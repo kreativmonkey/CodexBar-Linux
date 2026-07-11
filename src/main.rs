@@ -1,5 +1,6 @@
 mod config;
 mod engine;
+mod icons;
 mod model;
 mod providers;
 mod tray;
@@ -17,6 +18,7 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cfg = Config::load();
+    config::init_global(cfg.clone());
     let (providers, auto_detect) = providers::enabled_providers(&cfg.providers);
     if providers.is_empty() {
         tracing::warn!("no providers match the config — popover will be empty");

@@ -129,7 +129,9 @@ pub fn run(
                                 rebuild_card(&c, &state.borrow(), &cmd_tx_loop);
                             }
                         }
-                        UiEvent::TogglePopover => {
+                        UiEvent::TogglePopover | UiEvent::ShowProvider(_) => {
+                            // TODO: ShowProvider should select that provider's
+                            // view; for now both toggle visibility.
                             if let Some(window) = window_weak.upgrade() {
                                 let now_visible = window.is_visible();
                                 if !now_visible {

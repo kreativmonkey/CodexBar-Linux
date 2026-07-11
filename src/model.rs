@@ -60,6 +60,9 @@ pub enum UiEvent {
     /// Full new display state (all enabled providers, display order).
     StateChanged(Vec<ProviderDisplay>),
     TogglePopover,
+    /// Show the popover with this provider's view selected; if it is already
+    /// visible and showing that provider, hide it (toggle semantics per icon).
+    ShowProvider(String),
     Quit,
 }
 

@@ -297,49 +297,52 @@ fn parse_usage_response(
         }
     }
 
-    // Fallback: limits array
-    if !any_top_level {
-        if let Some(limits) = json.get("limits").and_then(|v| v.as_array()) {
-            for limit in limits {
-                // Skip inactive entries
-                if limit.get("is_active").and_then(|v| v.as_bool()) == Some(false) {
-                    continue;
-                }
-                let kind = limit
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                let group = limit
-                    .get("group")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                let percent = match limit.get("percent").and_then(|v| v.as_f64()) {
-                    Some(p) => p.clamp(0.0, 100.0),
-                    None => continue,
-                };
-                let resets_at = parse_resets_at(limit.get("resets_at"));
+    // Merge the limits array. Unscoped session/weekly entries duplicate the
+    // top-level windows, so they only count when those are absent; scoped
+    // entries (e.g. a per-model weekly limit like "Fable") exist ONLY here
+    // and are always added. `is_active` marks the currently binding limit,
+    // not validity — never filter on it.
+    if let Some(limits) = json.get("limits").and_then(|v| v.as_array()) {
+        for limit in limits {
+            let kind = limit
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let group = limit
+                .get("group")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let percent = match limit.get("percent").and_then(|v| v.as_f64()) {
+                Some(p) => p.clamp(0.0, 100.0),
+                None => continue,
+            };
+            let resets_at = parse_resets_at(limit.get("resets_at"));
 
-                let label = if group == "five_hour" || kind.contains("session") {
-                    "Session".to_string()
-                } else {
-                    // Weekly or scoped
-                    let model_display = limit
-                        .get("scope")
-                        .and_then(|s| s.get("model"))
-                        .and_then(|m| m.get("display_name"))
-                        .and_then(|v| v.as_str());
-                    match model_display {
-                        Some(name) => format!("Weekly ({})", name),
-                        None => "Weekly".to_string(),
+            let model_display = limit
+                .get("scope")
+                .and_then(|s| s.get("model"))
+                .and_then(|m| m.get("display_name"))
+                .and_then(|v| v.as_str());
+
+            let label = match model_display {
+                Some(name) => format!("Weekly ({})", name),
+                None => {
+                    if any_top_level {
+                        continue; // unscoped duplicates of five_hour/seven_day
                     }
-                };
+                    if group == "five_hour" || group == "session" || kind.contains("session") {
+                        "Session".to_string()
+                    } else {
+                        "Weekly".to_string()
+                    }
+                }
+            };
 
-                windows.push(RateWindow {
-                    label,
-                    used_percent: percent,
-                    resets_at,
-                });
-            }
+            windows.push(RateWindow {
+                label,
+                used_percent: percent,
+                resets_at,
+            });
         }
     }
 
@@ -558,12 +561,40 @@ mod tests {
     fn test_limits_fallback() {
         let snap = parse_usage_response(LIMITS_FALLBACK_RESPONSE, Some("team")).unwrap();
         assert_eq!(snap.plan.as_deref(), Some("Team"));
-        // The inactive entry (is_active: false) should be skipped
-        assert_eq!(snap.windows.len(), 2);
+        // is_active marks the binding limit, not validity — nothing is skipped.
+        assert_eq!(snap.windows.len(), 3);
         assert_eq!(snap.windows[0].label, "Session");
         assert!((snap.windows[0].used_percent - 30.0).abs() < 0.01);
         assert_eq!(snap.windows[1].label, "Weekly (Claude Opus 4)");
         assert!((snap.windows[1].used_percent - 65.0).abs() < 0.01);
+        assert_eq!(snap.windows[2].label, "Weekly");
+        assert!((snap.windows[2].used_percent - 20.0).abs() < 0.01);
+    }
+
+    /// Regression: scoped per-model limits (e.g. the promotional "Fable"
+    /// window) live ONLY in `limits` and must be merged even when the
+    /// top-level windows are present; their unscoped siblings duplicate
+    /// five_hour/seven_day and must not be doubled.
+    #[test]
+    fn test_scoped_limits_merged_with_top_level_windows() {
+        let body = r#"{
+            "five_hour": {"utilization": 24.0, "resets_at": "2026-07-12T03:30:00+00:00"},
+            "seven_day": {"utilization": 17.0, "resets_at": "2026-07-13T08:00:00+00:00"},
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 24,
+                 "resets_at": "2026-07-12T03:30:00+00:00", "scope": null, "is_active": false},
+                {"kind": "weekly_all", "group": "weekly", "percent": 17,
+                 "resets_at": "2026-07-13T08:00:00+00:00", "scope": null, "is_active": false},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 26,
+                 "resets_at": "2026-07-13T08:00:00+00:00",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+                 "is_active": true}
+            ]
+        }"#;
+        let snap = parse_usage_response(body, Some("pro")).unwrap();
+        let labels: Vec<&str> = snap.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, vec!["Session", "Weekly", "Weekly (Fable)"]);
+        assert!((snap.windows[2].used_percent - 26.0).abs() < 0.01);
     }
 
     #[test]

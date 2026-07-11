@@ -1,5 +1,15 @@
 pub mod claude;
 pub mod codex;
+pub mod copilot;
+pub mod cursor;
+pub mod deepseek;
+pub mod gemini;
+pub mod grok;
+pub mod groq;
+pub mod mistral;
+pub mod openai;
+pub mod openrouter;
+pub mod perplexity;
 
 use crate::model::UsageSnapshot;
 use std::sync::Arc;
@@ -21,11 +31,21 @@ pub trait Provider: Send + Sync {
     async fn fetch(&self) -> anyhow::Result<UsageSnapshot>;
 }
 
-/// All known providers in display order.
+/// All known providers, ordered by importance (= display order).
 pub fn all_providers() -> Vec<Arc<dyn Provider>> {
     vec![
         Arc::new(claude::ClaudeProvider::new()),
         Arc::new(codex::CodexProvider::new()),
+        Arc::new(gemini::GeminiProvider::new()),
+        Arc::new(copilot::CopilotProvider::new()),
+        Arc::new(cursor::CursorProvider::new()),
+        Arc::new(openrouter::OpenRouterProvider::new()),
+        Arc::new(openai::OpenAIProvider::new()),
+        Arc::new(mistral::MistralProvider::new()),
+        Arc::new(deepseek::DeepSeekProvider::new()),
+        Arc::new(groq::GroqProvider::new()),
+        Arc::new(grok::GrokProvider::new()),
+        Arc::new(perplexity::PerplexityProvider::new()),
     ]
 }
 
