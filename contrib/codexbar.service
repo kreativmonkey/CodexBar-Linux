@@ -1,0 +1,14 @@
+[Unit]
+Description=CodexBar — AI provider usage tray
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.nix-profile/bin/codexbar
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

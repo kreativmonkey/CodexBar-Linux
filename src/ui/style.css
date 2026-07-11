@@ -1,0 +1,152 @@
+/* CodexBar popover stylesheet */
+
+window {
+    background: transparent;
+}
+
+.card {
+    background: rgba(24, 25, 32, 0.96);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 16px;
+    min-width: 300px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.48), 0 2px 8px rgba(0, 0, 0, 0.32);
+    color: #e6e8ef;
+}
+
+.tile {
+    padding: 8px 0;
+}
+
+.tile-header {
+    margin-bottom: 6px;
+}
+
+.provider-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #e6e8ef;
+}
+
+.badge {
+    background: rgba(122, 162, 247, 0.18);
+    color: #7aa2f7;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+}
+
+.win-row {
+    margin-bottom: 2px;
+}
+
+.win-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.win-pct {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e6e8ef;
+}
+
+.win-pct.ok {
+    color: #a6e3a1;
+}
+
+.win-pct.warn {
+    color: #fab387;
+}
+
+.win-pct.crit {
+    color: #f38ba8;
+}
+
+.caption {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 2px;
+}
+
+.error {
+    font-size: 12px;
+    color: #f38ba8;
+}
+
+.empty-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    padding: 8px 0;
+}
+
+/* Progress bar track */
+levelbar {
+    min-height: 6px;
+    border-radius: 3px;
+    margin-bottom: 4px;
+}
+
+levelbar trough {
+    min-height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.09);
+    border: none;
+    padding: 0;
+}
+
+/* Default (ok) fill colour */
+levelbar block.filled {
+    min-height: 6px;
+    border-radius: 3px;
+    background: #a6e3a1;
+    border: none;
+}
+
+/* Severity overrides via parent widget class (set_css_classes on the LevelBar) */
+levelbar.warn block.filled {
+    background: #fab387;
+}
+
+levelbar.crit block.filled {
+    background: #f38ba8;
+}
+
+levelbar block.empty {
+    min-height: 6px;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-width: 0;
+}
+
+/* Footer */
+.footer {
+    margin-top: 8px;
+    padding-top: 8px;
+}
+
+.footer-btn {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+}
+
+.footer-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e6e8ef;
+}
+
+.last-updated {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.38);
+}
+
+separator {
+    background: rgba(255, 255, 255, 0.07);
+    min-height: 1px;
+    margin: 4px 0;
+}

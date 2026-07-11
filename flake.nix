@@ -46,6 +46,23 @@
         };
       });
 
+      packages = forAllSystems (pkgs: rec {
+        codexbar = pkgs.rustPlatform.buildRustPackage {
+          pname = "codexbar";
+          version = "0.1.0";
+          src = self;
+          cargoLock.lockFile = ./Cargo.lock;
+          nativeBuildInputs = nativeDeps pkgs;
+          buildInputs = buildDeps pkgs;
+          meta = {
+            description = "System tray usage monitor for AI coding providers";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "codexbar";
+          };
+        };
+        default = codexbar;
+      });
+
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
     };
 }
