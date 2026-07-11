@@ -29,14 +29,21 @@ pub fn all_providers() -> Vec<Arc<dyn Provider>> {
     ]
 }
 
-/// Providers to actually poll: the configured subset, or auto-detected.
-pub fn enabled_providers(configured: &[String]) -> Vec<Arc<dyn Provider>> {
+/// Providers to poll, plus whether auto-detection is active.
+///
+/// With an explicit config list only those providers run (errors shown when
+/// their credentials are missing). Otherwise all providers are returned and
+/// the engine re-checks `is_configured()` every cycle, so logging in to a new
+/// CLI makes its provider appear without restarting.
+pub fn enabled_providers(configured: &[String]) -> (Vec<Arc<dyn Provider>>, bool) {
     let all = all_providers();
     if configured.is_empty() {
-        all.into_iter().filter(|p| p.is_configured()).collect()
+        (all, true)
     } else {
-        all.into_iter()
+        let picked = all
+            .into_iter()
             .filter(|p| configured.iter().any(|c| c == p.id()))
-            .collect()
+            .collect();
+        (picked, false)
     }
 }

@@ -17,9 +17,9 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cfg = Config::load();
-    let providers = providers::enabled_providers(&cfg.providers);
+    let (providers, auto_detect) = providers::enabled_providers(&cfg.providers);
     if providers.is_empty() {
-        tracing::warn!("no provider credentials found — popover will be empty");
+        tracing::warn!("no providers match the config — popover will be empty");
     }
 
     // UI events for the GTK main thread; engine events are fanned out below.
@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
                     };
 
                     tokio::join!(
-                        engine::run(providers, refresh_secs, bus_tx, cmd_rx),
+                        engine::run(providers, auto_detect, refresh_secs, bus_tx, cmd_rx),
                         forward,
                     );
                 });
