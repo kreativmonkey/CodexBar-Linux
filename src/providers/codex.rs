@@ -1,0 +1,29 @@
+use crate::model::UsageSnapshot;
+use crate::providers::Provider;
+
+pub struct CodexProvider;
+
+impl CodexProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for CodexProvider {
+    fn id(&self) -> &'static str {
+        "codex"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Codex"
+    }
+
+    fn is_configured(&self) -> bool {
+        false
+    }
+
+    async fn fetch(&self) -> anyhow::Result<UsageSnapshot> {
+        anyhow::bail!("not implemented")
+    }
+}
