@@ -14,6 +14,66 @@ window {
     color: #e6e8ef;
 }
 
+/* ── Provider switcher bar ─────────────────────────────────────────────────── */
+
+.switcher {
+    padding: 4px 0 6px;
+}
+
+.provider-tab {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    padding: 5px 8px;
+    min-width: 36px;
+    transition: background 120ms ease;
+}
+
+.provider-tab:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.provider-tab.active {
+    background: rgba(122, 162, 247, 0.15);
+}
+
+.provider-tab.active:hover {
+    background: rgba(122, 162, 247, 0.22);
+}
+
+/* fallback letter when no logo SVG is available */
+.tab-fallback {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e6e8ef;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+/* Status dots */
+.status-dot {
+    font-size: 5px;
+    margin-top: 1px;
+}
+
+.dot-green {
+    color: #a6e3a1;
+}
+
+.dot-orange {
+    color: #fab387;
+}
+
+.dot-red {
+    color: #f38ba8;
+}
+
+.dot-gray {
+    color: rgba(255, 255, 255, 0.30);
+}
+
+/* ── Provider tile ─────────────────────────────────────────────────────────── */
+
 .tile {
     padding: 8px 0;
 }
@@ -80,7 +140,8 @@ window {
     padding: 8px 0;
 }
 
-/* Progress bar track */
+/* ── Progress bar ──────────────────────────────────────────────────────────── */
+
 levelbar {
     min-height: 6px;
     border-radius: 3px;
@@ -120,7 +181,8 @@ levelbar block.empty {
     min-width: 0;
 }
 
-/* Footer */
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+
 .footer {
     margin-top: 8px;
     padding-top: 8px;

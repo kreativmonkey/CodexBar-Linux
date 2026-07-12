@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use chrono::{DateTime, Local, Utc};
+use gtk4::gdk::MemoryFormat;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GBox, Button, CssProvider, EventControllerKey, Label,
-    LevelBar, Orientation, Separator,
+    Application, ApplicationWindow, Box as GBox, Button, CssProvider, EventControllerKey, Image,
+    Label, LevelBar, Orientation, Separator,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -15,12 +16,58 @@ use crate::model::{EngineCommand, ProviderDisplay, ProviderState, UiEvent};
 
 const STYLE: &str = include_str!("style.css");
 
+// ---------------------------------------------------------------------------
+// Icon helpers
+// ---------------------------------------------------------------------------
+
+/// Build a GTK Image from a provider logo at `size` logical pixels.
+/// Tint: #e6e8ef. Returns None if rasterization fails.
+fn make_logo_image(provider_id: &str, size: u32) -> Option<Image> {
+    let pixmap = crate::icons::logo_pixmap(provider_id, size, Some([0xe6, 0xe8, 0xef]))?;
+    let width = pixmap.width() as i32;
+    let height = pixmap.height() as i32;
+    let stride = (pixmap.width() * 4) as usize;
+    let bytes = glib::Bytes::from(pixmap.data());
+    let texture = gtk4::gdk::MemoryTexture::new(
+        width,
+        height,
+        MemoryFormat::R8g8b8a8Premultiplied,
+        &bytes,
+        stride,
+    );
+    let image = Image::from_paintable(Some(&texture));
+    image.set_pixel_size(size as i32);
+    Some(image)
+}
+
+// ---------------------------------------------------------------------------
+// Status-dot CSS class
+// ---------------------------------------------------------------------------
+
+fn dot_class(display: &ProviderDisplay) -> &'static str {
+    match &display.state {
+        ProviderState::Loading => "dot-gray",
+        ProviderState::Error(_) => "dot-red",
+        ProviderState::Ready(snap) => match snap.max_used_percent() {
+            None => "dot-gray",
+            Some(p) if p >= 90.0 => "dot-red",
+            Some(p) if p >= 70.0 => "dot-orange",
+            _ => "dot-green",
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
 /// Run the GTK application (blocks the main thread until quit).
 ///
 /// Listens on `ui_rx`:
-/// - `StateChanged(displays)` -> rebuild popover content
-/// - `TogglePopover` -> show/hide the layer-shell popover
-/// - `Quit` -> exit the application
+/// - `StateChanged(displays)` → rebuild popover content
+/// - `ShowProvider(id)`      → select provider view, toggle visibility
+/// - `ShowProvider(id)`      → select provider + show; toggle if already shown
+/// - `Quit`                  → exit
 pub fn run(
     cfg: Config,
     ui_rx: async_channel::Receiver<UiEvent>,
@@ -67,6 +114,9 @@ pub fn run(
         // Shared provider state.
         let state: Rc<RefCell<Vec<ProviderDisplay>>> = Rc::new(RefCell::new(Vec::new()));
 
+        // Selected provider id.  None → fall back to first provider.
+        let selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
         // Content box (card).
         let card = GBox::builder()
             .orientation(Orientation::Vertical)
@@ -95,6 +145,7 @@ pub fn run(
         // Periodic refresh of countdown labels (every 30 s).
         {
             let state_weak = Rc::downgrade(&state);
+            let selection_weak = Rc::downgrade(&selection);
             let card_weak = card.downgrade();
             let window_weak = window.downgrade();
             let cmd_tx_timer = cmd_tx.clone();
@@ -103,8 +154,12 @@ pub fn run(
                     return glib::ControlFlow::Break;
                 };
                 if window.is_visible() {
-                    if let (Some(st), Some(c)) = (state_weak.upgrade(), card_weak.upgrade()) {
-                        rebuild_card(&c, &st.borrow(), &cmd_tx_timer);
+                    if let (Some(st), Some(sel), Some(c)) = (
+                        state_weak.upgrade(),
+                        selection_weak.upgrade(),
+                        card_weak.upgrade(),
+                    ) {
+                        rebuild_card(&c, &st, &sel, &cmd_tx_timer);
                     }
                 }
                 glib::ControlFlow::Continue
@@ -114,6 +169,7 @@ pub fn run(
         // Event loop consuming ui_rx.
         {
             let state = Rc::clone(&state);
+            let selection = Rc::clone(&selection);
             let window_weak = window.downgrade();
             let card_weak = card.downgrade();
             let cmd_tx_loop = cmd_tx.clone();
@@ -124,23 +180,46 @@ pub fn run(
                 while let Ok(event) = ui_rx.recv().await {
                     match event {
                         UiEvent::StateChanged(displays) => {
+                            // Keep selection if that provider still exists; else fall back.
+                            {
+                                let mut sel = selection.borrow_mut();
+                                let still_exists = sel
+                                    .as_ref()
+                                    .is_some_and(|id| displays.iter().any(|d| d.id == id.as_str()));
+                                if !still_exists {
+                                    *sel = displays.first().map(|d| d.id.to_string());
+                                }
+                            }
                             *state.borrow_mut() = displays;
                             if let Some(c) = card_weak.upgrade() {
-                                rebuild_card(&c, &state.borrow(), &cmd_tx_loop);
+                                rebuild_card(&c, &state, &selection, &cmd_tx_loop);
                             }
                         }
-                        UiEvent::TogglePopover | UiEvent::ShowProvider(_) => {
-                            // TODO: ShowProvider should select that provider's
-                            // view; for now both toggle visibility.
+                        UiEvent::ShowProvider(id) => {
                             if let Some(window) = window_weak.upgrade() {
-                                let now_visible = window.is_visible();
-                                if !now_visible {
-                                    // Rebuild countdown texts when about to show.
-                                    if let Some(c) = card_weak.upgrade() {
-                                        rebuild_card(&c, &state.borrow(), &cmd_tx_loop);
+                                let already_selected =
+                                    selection.borrow().as_deref().is_some_and(|s| s == id);
+                                let is_visible = window.is_visible();
+
+                                if is_visible && already_selected {
+                                    // Toggle off: same provider tray-icon clicked again.
+                                    window.set_visible(false);
+                                } else {
+                                    // Switch to provider (if known), rebuild, show.
+                                    {
+                                        let displays = state.borrow();
+                                        if displays.iter().any(|d| d.id == id.as_str()) {
+                                            *selection.borrow_mut() = Some(id);
+                                        } else if selection.borrow().is_none() {
+                                            *selection.borrow_mut() =
+                                                displays.first().map(|d| d.id.to_string());
+                                        }
                                     }
+                                    if let Some(c) = card_weak.upgrade() {
+                                        rebuild_card(&c, &state, &selection, &cmd_tx_loop);
+                                    }
+                                    window.set_visible(true);
                                 }
-                                window.set_visible(!now_visible);
                             }
                         }
                         UiEvent::Quit => {
@@ -166,16 +245,19 @@ pub fn run(
 // Card builder
 // ---------------------------------------------------------------------------
 
-/// Remove all children of `card` and rebuild from `displays`.
+/// Remove all children of `card` and rebuild from live `state`.
 fn rebuild_card(
     card: &GBox,
-    displays: &[ProviderDisplay],
+    state: &Rc<RefCell<Vec<ProviderDisplay>>>,
+    selection: &Rc<RefCell<Option<String>>>,
     cmd_tx: &async_channel::Sender<EngineCommand>,
 ) {
     // Clear existing children.
     while let Some(child) = card.first_child() {
         card.remove(&child);
     }
+
+    let displays = state.borrow();
 
     if displays.is_empty() {
         let lbl = Label::builder()
@@ -185,25 +267,122 @@ fn rebuild_card(
             .wrap(true)
             .build();
         card.append(&lbl);
-    } else {
-        // Collect the newest fetched_at across all ready providers for the footer.
-        let mut newest_fetched_at: Option<DateTime<Utc>> = None;
+        return;
+    }
 
-        for (i, display) in displays.iter().enumerate() {
-            if i > 0 {
-                let sep = Separator::new(Orientation::Horizontal);
-                card.append(&sep);
-            }
-            let tile = build_tile(display, &mut newest_fetched_at);
-            card.append(&tile);
+    // Resolve the effective selected id.
+    let effective_id: String = {
+        let sel = selection.borrow();
+        match sel.as_ref() {
+            Some(id) if displays.iter().any(|d| d.id == id.as_str()) => id.clone(),
+            _ => displays[0].id.to_string(),
+        }
+    };
+
+    // Provider icon bar — hidden when only one provider.
+    if displays.len() > 1 {
+        let switcher = build_switcher(&displays, &effective_id, state, selection, card, cmd_tx);
+        card.append(&switcher);
+
+        let sep = Separator::new(Orientation::Horizontal);
+        card.append(&sep);
+    }
+
+    // Detail tile for the selected provider only.
+    let mut newest_fetched_at: Option<DateTime<Utc>> = None;
+    if let Some(display) = displays.iter().find(|d| d.id == effective_id.as_str()) {
+        let tile = build_tile(display, &mut newest_fetched_at);
+        card.append(&tile);
+    }
+
+    // Footer.
+    let foot_sep = Separator::new(Orientation::Horizontal);
+    card.append(&foot_sep);
+    let footer = build_footer(cmd_tx, newest_fetched_at);
+    card.append(&footer);
+}
+
+// ---------------------------------------------------------------------------
+// Provider switcher bar
+// ---------------------------------------------------------------------------
+
+fn build_switcher(
+    displays: &[ProviderDisplay],
+    effective_id: &str,
+    state: &Rc<RefCell<Vec<ProviderDisplay>>>,
+    selection: &Rc<RefCell<Option<String>>>,
+    card: &GBox,
+    cmd_tx: &async_channel::Sender<EngineCommand>,
+) -> GBox {
+    let switcher = GBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(4)
+        .css_classes(["switcher"])
+        .halign(gtk4::Align::Center)
+        .build();
+
+    for display in displays {
+        let provider_id = display.id;
+
+        // Each tab: vertical box with logo + status dot.
+        let tab_box = GBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(2)
+            .halign(gtk4::Align::Center)
+            .build();
+
+        // Logo image, or fallback: first letter of provider name.
+        if let Some(img) = make_logo_image(provider_id, 18) {
+            tab_box.append(&img);
+        } else {
+            let first_char = display
+                .name
+                .chars()
+                .next()
+                .map(|c| c.to_uppercase().to_string())
+                .unwrap_or_else(|| "?".to_string());
+            let fallback = Label::builder()
+                .label(first_char.as_str())
+                .css_classes(["tab-fallback"])
+                .build();
+            tab_box.append(&fallback);
         }
 
-        // Footer.
-        let foot_sep = Separator::new(Orientation::Horizontal);
-        card.append(&foot_sep);
-        let footer = build_footer(cmd_tx, newest_fetched_at);
-        card.append(&footer);
+        // Status dot below the logo.
+        let dot = Label::builder()
+            .label("●")
+            .css_classes(["status-dot", dot_class(display)])
+            .halign(gtk4::Align::Center)
+            .build();
+        tab_box.append(&dot);
+
+        // Flat toggle button wrapping the tab content.
+        let btn = Button::builder().css_classes(["provider-tab"]).build();
+        btn.set_child(Some(&tab_box));
+
+        if provider_id == effective_id {
+            btn.add_css_class("active");
+        }
+
+        // Click: update selection and rebuild the card immediately.
+        {
+            let selection = Rc::clone(selection);
+            let state = Rc::clone(state);
+            let card_weak = card.downgrade();
+            let cmd_tx = cmd_tx.clone();
+            let id_str = provider_id.to_string();
+            btn.connect_clicked(move |_| {
+                *selection.borrow_mut() = Some(id_str.clone());
+                if let Some(c) = card_weak.upgrade() {
+                    rebuild_card(&c, &state, &selection, &cmd_tx);
+                }
+            });
+        }
+
+        switcher.append(&btn);
     }
+
+    switcher
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +415,7 @@ fn build_tile(display: &ProviderDisplay, newest_fetched_at: &mut Option<DateTime
         let spacer = GBox::builder().hexpand(true).build();
         header.append(&spacer);
 
-        // Plan badge (only when known) and fetch-time tracking.
+        // Plan badge and fetch-time tracking.
         if let ProviderState::Ready(ref snap) = display.state {
             if let Some(ref plan) = snap.plan {
                 let badge = Label::builder()
@@ -318,11 +497,9 @@ fn build_tile(display: &ProviderDisplay, newest_fetched_at: &mut Option<DateTime
                     .max_value(100.0)
                     .value(pct)
                     .build();
-                // Remove the default thresholds so we get a simple single-block bar.
                 bar.remove_offset_value(Some("low"));
                 bar.remove_offset_value(Some("high"));
                 bar.remove_offset_value(Some("full"));
-                // Tag with severity so CSS can target `levelbar.ok block.filled` etc.
                 bar.set_css_classes(&["bar", sev]);
                 tile.append(&bar);
 
@@ -426,9 +603,6 @@ fn severity(pct: f64) -> &'static str {
 }
 
 /// Format a UTC reset time as a human-readable string.
-///
-/// - If < 24 h away: "resets in 2 h 14 m"
-/// - Otherwise: "resets Fri 09:00"
 fn format_reset_time(resets_at: DateTime<Utc>) -> String {
     let now = Utc::now();
     if resets_at <= now {
@@ -451,14 +625,12 @@ fn format_reset_time(resets_at: DateTime<Utc>) -> String {
 }
 
 /// Open the config file in the user's default editor/viewer.
-/// Creates the file (with commented defaults) if it doesn't exist.
 fn open_config_file() {
     let Some(path) = config_path() else {
         tracing::warn!("cannot determine config path");
         return;
     };
 
-    // Ensure parent directory and file exist.
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             tracing::warn!("cannot create config dir: {e}");
