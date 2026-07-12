@@ -221,7 +221,8 @@ fn extract_email_from_id_token(id_token: Option<&str>) -> Option<String> {
 }
 
 /// Minimal base64 decoder (standard alphabet, padded input).
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
+/// Shared with the Cursor provider for JWT payload decoding.
+pub(crate) fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut table = [0u8; 256];
     for (i, &c) in alphabet.iter().enumerate() {

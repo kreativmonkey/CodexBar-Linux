@@ -19,19 +19,74 @@ impl CursorProvider {
 
 /// Resolve the `WorkosCursorSessionToken` cookie value.
 ///
-/// Source priority (matches Swift `CursorStatusProbe` fallback chain on Linux):
-///  1. `CURSOR_SESSION_TOKEN` environment variable.
-///  2. `[keys] cursor = "…"` in codexbar config.
-///
-/// On Linux the Cursor.app stores its auth token in an SQLite3 VSCode global
-/// state DB (`~/.config/Cursor/User/globalStorage/state.vscdb`). Reading
-/// SQLite without a dependency would require vendoring a C library — this
-/// would violate the "do not modify Cargo.toml" constraint.  We therefore
-/// skip the DB path and rely on the explicit env/config token.  Users can
-/// extract their token once from the Cursor dashboard or DevTools and place it
-/// in the config.  is_configured() returns false when neither source is set.
+/// Source priority (matches Swift `CursorStatusProbe` fallback chain):
+///  1. `CURSOR_SESSION_TOKEN` environment variable / `[keys] cursor` config.
+///  2. The locally installed Cursor app's global state DB
+///     (`~/.config/Cursor/User/globalStorage/state.vscdb`) — same source the
+///     macOS original reads; the cookie is `<userID>%3A%3A<accessToken>`
+///     where userID is the last `|`-segment of the JWT `sub` claim.
 fn resolve_session_token() -> Option<String> {
-    crate::config::api_key("cursor", "CURSOR_SESSION_TOKEN")
+    crate::config::api_key("cursor", "CURSOR_SESSION_TOKEN").or_else(app_session_token)
+}
+
+fn app_db_path() -> Option<std::path::PathBuf> {
+    Some(
+        dirs::config_dir()?
+            .join("Cursor")
+            .join("User")
+            .join("globalStorage")
+            .join("state.vscdb"),
+    )
+}
+
+/// Build the session cookie from the Cursor app's own credential store.
+fn app_session_token() -> Option<String> {
+    let path = app_db_path()?;
+    if !path.exists() {
+        return None;
+    }
+    let db =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
+    db.busy_timeout(std::time::Duration::from_millis(250))
+        .ok()?;
+    let token: String = db
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok()?;
+    session_cookie_from_jwt(token.trim())
+}
+
+/// `<userID>%3A%3A<jwt>` from a Cursor access-token JWT; None when the token
+/// is malformed or expires within the next minute.
+fn session_cookie_from_jwt(token: &str) -> Option<String> {
+    if token.is_empty() {
+        return None;
+    }
+    let payload_b64 = token.split('.').nth(1)?;
+    let mut payload = payload_b64.replace('-', "+").replace('_', "/");
+    let rem = payload.len() % 4;
+    if rem > 0 {
+        payload.push_str(&"=".repeat(4 - rem));
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&super::gemini::base64_decode(&payload)?).ok()?;
+
+    let exp = json.get("exp").and_then(|v| v.as_i64())?;
+    if exp <= chrono::Utc::now().timestamp() + 60 {
+        tracing::debug!("cursor: app access token expired");
+        return None;
+    }
+    let user_id = json
+        .get("sub")
+        .and_then(|v| v.as_str())?
+        .split('|')
+        .rfind(|s| !s.is_empty())?
+        .to_string();
+    Some(format!("{user_id}%3A%3A{token}"))
 }
 
 // ── response parsing ──────────────────────────────────────────────────────────
@@ -293,6 +348,58 @@ async fn fetch_usage() -> anyhow::Result<UsageSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn b64url(s: &str) -> String {
+        // Tests only need URL-safe chars; build via the std alphabet map.
+        let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let bytes = s.as_bytes();
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [
+                chunk[0],
+                chunk.get(1).copied().unwrap_or(0),
+                chunk.get(2).copied().unwrap_or(0),
+            ];
+            let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+            out.push(table[(n >> 18) as usize & 63] as char);
+            out.push(table[(n >> 12) as usize & 63] as char);
+            if chunk.len() > 1 {
+                out.push(table[(n >> 6) as usize & 63] as char);
+            }
+            if chunk.len() > 2 {
+                out.push(table[n as usize & 63] as char);
+            }
+        }
+        out
+    }
+
+    fn fake_jwt(sub: &str, exp: i64) -> String {
+        format!(
+            "{}.{}.sig",
+            b64url(r#"{"alg":"none"}"#),
+            b64url(&format!(r#"{{"sub":"{sub}","exp":{exp}}}"#))
+        )
+    }
+
+    #[test]
+    fn session_cookie_from_valid_jwt() {
+        let exp = chrono::Utc::now().timestamp() + 3600;
+        let jwt = fake_jwt("auth0|user_01ABC", exp);
+        let cookie = session_cookie_from_jwt(&jwt).unwrap();
+        assert_eq!(cookie, format!("user_01ABC%3A%3A{jwt}"));
+    }
+
+    #[test]
+    fn session_cookie_rejects_expired_jwt() {
+        let jwt = fake_jwt("auth0|user_01ABC", chrono::Utc::now().timestamp() - 10);
+        assert!(session_cookie_from_jwt(&jwt).is_none());
+    }
+
+    #[test]
+    fn session_cookie_rejects_malformed_token() {
+        assert!(session_cookie_from_jwt("").is_none());
+        assert!(session_cookie_from_jwt("not-a-jwt").is_none());
+    }
 
     const PRO_PLAN_RESPONSE: &str = r#"{
         "billingCycleStart": "2025-01-01T00:00:00.000Z",
