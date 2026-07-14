@@ -12,13 +12,39 @@ Waybar, …).
   progress ring (green/orange/red by utilization)
 - Click an icon → styled popover with a provider switcher bar, usage bars,
   reset countdowns, plan badge and credits
-- Providers: Claude, Codex, Gemini, GitHub Copilot, Cursor, OpenRouter,
-  OpenAI, Mistral, DeepSeek, Groq, Grok*, Perplexity* (pluggable — one file
-  per provider). *Grok/Perplexity expose no API-key billing endpoint; they
-  show an actionable hint instead of data.
 - Auto-detects providers from existing CLI logins and API keys; appears/
   disappears without restart
 - Refresh every 5 min (configurable), manual refresh from tray menu/popover
+
+## Supported providers
+
+| Provider | ID | Auth | Status |
+|----------|----|------|--------|
+| Claude | `claude` | `claude` CLI session (`~/.claude/.credentials.json`) | **Tested** |
+| Codex | `codex` | `codex` CLI session (`~/.codex/auth.json`) | **Tested** |
+| Gemini | `gemini` | Gemini CLI OAuth (`~/.gemini/oauth_creds.json`) | **Tested** |
+| Cursor | `cursor` | Cursor app DB or `CURSOR_SESSION_TOKEN` cookie | **Tested** |
+| GitHub Copilot | `copilot` | `COPILOT_API_TOKEN` / `[keys] copilot` | Untested |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / `[keys] openrouter` | Untested |
+| OpenAI | `openai` | `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` | Untested |
+| Mistral | `mistral` | `MISTRAL_API_KEY` / `[keys] mistral` | Untested |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` / `[keys] deepseek` | Untested |
+| Groq | `groq` | `GROQ_API_KEY` / `[keys] groq` | Untested |
+| Grok | `grok` | `XAI_API_KEY` (inference only) | No billing API |
+| Perplexity | `perplexity` | Session cookie (no API-key billing endpoint) | No billing API |
+
+**Tested** — verified against live accounts on Linux (usage bars, resets, token
+refresh where applicable).
+
+**Untested** — provider module and unit tests exist, but no live end-to-end
+verification yet. Bug reports welcome; response mapping may need adjustment.
+
+**No billing API** — the provider can appear when configured, but xAI and
+Perplexity do not expose usage/credits via their public API keys. Grok shows an
+actionable hint; Perplexity requires a browser session cookie (same limitation
+as the macOS original).
+
+Each provider lives in one file under `src/providers/`.
 
 ## Install (Nix)
 
