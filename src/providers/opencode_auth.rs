@@ -54,10 +54,6 @@ pub fn provider_api_key(service_id: &str) -> Option<String> {
     None
 }
 
-pub fn openrouter_key() -> Option<String> {
-    provider_api_key(OPENROUTER_SERVICE_ID)
-}
-
 pub fn zen_key() -> Option<String> {
     provider_api_key(ZEN_SERVICE_ID)
 }
