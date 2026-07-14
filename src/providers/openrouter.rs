@@ -83,10 +83,7 @@ fn build_snapshot(
         }
     }
 
-    let credits = Some(Credits::from_balance(
-        balance,
-        Some("USD".to_string()),
-    ));
+    let credits = Some(Credits::from_balance(balance, Some("USD".to_string())));
 
     debug!(
         "openrouter: balance={:.4} windows={}",
@@ -120,9 +117,10 @@ impl Provider for OpenRouterProvider {
     }
 
     async fn fetch(&self) -> anyhow::Result<UsageSnapshot> {
-        let key = api_key()
-            .context("OpenRouter API key not set — set OPENROUTER_API_KEY, add \
-             [keys] openrouter to config.toml, or run `opencode` → /connect → OpenRouter")?;
+        let key = api_key().context(
+            "OpenRouter API key not set — set OPENROUTER_API_KEY, add \
+             [keys] openrouter to config.toml, or run `opencode` → /connect → OpenRouter",
+        )?;
 
         let auth = format!("Bearer {}", key);
         let headers: &[(&str, &str)] = &[

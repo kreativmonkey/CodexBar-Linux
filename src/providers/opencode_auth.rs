@@ -129,7 +129,10 @@ mod tests {
             parse_auth_json(AUTH_JSON, "openrouter").as_deref(),
             Some("sk-or-test")
         );
-        assert_eq!(parse_auth_json(AUTH_JSON, "opencode").as_deref(), Some("sk-zen"));
+        assert_eq!(
+            parse_auth_json(AUTH_JSON, "opencode").as_deref(),
+            Some("sk-zen")
+        );
         assert!(parse_auth_json(AUTH_JSON, "missing").is_none());
     }
 

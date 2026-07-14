@@ -153,7 +153,10 @@ fn build_snapshot_from_spend(spend_usd: f64) -> UsageSnapshot {
         plan: None,
         account: None,
         windows: vec![],
-        credits: Some(Credits::from_balance(spend_usd.max(0.0), Some("USD".to_string()))),
+        credits: Some(Credits::from_balance(
+            spend_usd.max(0.0),
+            Some("USD".to_string()),
+        )),
         fetched_at: Some(Utc::now()),
     }
 }
