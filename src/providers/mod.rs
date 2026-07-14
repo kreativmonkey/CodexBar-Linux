@@ -8,6 +8,8 @@ pub mod grok;
 pub mod groq;
 pub mod mistral;
 pub mod openai;
+pub mod opencode_auth;
+pub mod opencode_zen;
 pub mod openrouter;
 pub mod perplexity;
 
@@ -40,6 +42,7 @@ pub fn all_providers() -> Vec<Arc<dyn Provider>> {
         Arc::new(copilot::CopilotProvider::new()),
         Arc::new(cursor::CursorProvider::new()),
         Arc::new(openrouter::OpenRouterProvider::new()),
+        Arc::new(opencode_zen::OpenCodeZenProvider::new()),
         Arc::new(openai::OpenAIProvider::new()),
         Arc::new(mistral::MistralProvider::new()),
         Arc::new(deepseek::DeepSeekProvider::new()),

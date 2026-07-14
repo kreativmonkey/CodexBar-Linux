@@ -54,10 +54,7 @@ pub(crate) fn parse_credits_response(body: &str) -> anyhow::Result<UsageSnapshot
     debug!("perplexity: balance_cents={balance_cents} → balance={balance:.2}");
 
     Ok(UsageSnapshot {
-        credits: Some(Credits {
-            balance,
-            currency: Some("USD".to_string()),
-        }),
+        credits: Some(Credits::from_balance(balance, Some("USD".to_string()))),
         fetched_at: Some(chrono::Utc::now()),
         ..Default::default()
     })

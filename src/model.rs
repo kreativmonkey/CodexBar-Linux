@@ -12,8 +12,24 @@ pub struct RateWindow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Credits {
+    /// Remaining balance when no breakdown is available.
     pub balance: f64,
     pub currency: Option<String>,
+    /// Optional spent amount (e.g. Claude extra usage).
+    pub used: Option<f64>,
+    /// Optional cap/limit paired with `used`.
+    pub limit: Option<f64>,
+}
+
+impl Credits {
+    pub fn from_balance(balance: f64, currency: Option<String>) -> Self {
+        Self {
+            balance,
+            currency,
+            used: None,
+            limit: None,
+        }
+    }
 }
 
 /// Result of one successful provider fetch.

@@ -155,10 +155,7 @@ fn parse_usage_response(body: &str) -> anyhow::Result<UsageSnapshot> {
             return None;
         }
         let balance = c.get("balance").and_then(|v| v.as_f64())?;
-        Some(Credits {
-            balance,
-            currency: None,
-        })
+        Some(Credits::from_balance(balance, None))
     });
 
     debug!("codex: parsed {} windows", windows.len());

@@ -297,6 +297,31 @@ fn parse_usage_response(
         }
     }
 
+    // Extra top-level windows (Daily Routines, Cowork, …).
+    for (field, label) in [
+        ("seven_day_routines", "Daily Routines"),
+        ("seven_day_cowork", "Cowork"),
+    ] {
+        if let Some(w) = json.get(field) {
+            if w.is_null() {
+                continue;
+            }
+            let utilization = match w.get("utilization").and_then(|v| v.as_f64()) {
+                Some(u) => u.clamp(0.0, 100.0),
+                None => {
+                    warn!("claude: window '{field}' missing utilization, skipping");
+                    continue;
+                }
+            };
+            let resets_at = parse_resets_at(w.get("resets_at"));
+            windows.push(RateWindow {
+                label: label.to_string(),
+                used_percent: utilization,
+                resets_at,
+            });
+        }
+    }
+
     // Merge the limits array. Unscoped session/weekly entries duplicate the
     // top-level windows, so they only count when those are absent; scoped
     // entries (e.g. a per-model weekly limit like "Fable") exist ONLY here
@@ -346,22 +371,49 @@ fn parse_usage_response(
         }
     }
 
-    // credits from extra_usage
-    let credits = json.get("extra_usage").and_then(|eu| {
+    // Extra usage spend cap (values are minor currency units, e.g. cents).
+    let mut credits = None;
+    if let Some(eu) = json.get("extra_usage") {
         let enabled = eu
             .get("is_enabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        if !enabled {
-            return None;
+        if enabled {
+            if let (Some(used_minor), Some(limit_minor)) = (
+                eu.get("used_credits").and_then(|v| v.as_f64()),
+                eu.get("monthly_limit").and_then(|v| v.as_f64()),
+            ) {
+                let used = used_minor / 100.0;
+                let limit = limit_minor / 100.0;
+                let utilization = eu
+                    .get("utilization")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or_else(|| {
+                        if limit > 0.0 {
+                            used / limit * 100.0
+                        } else {
+                            0.0
+                        }
+                    })
+                    .clamp(0.0, 100.0);
+                let currency = eu
+                    .get("currency")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                windows.push(RateWindow {
+                    label: "Extra usage".to_string(),
+                    used_percent: utilization,
+                    resets_at: None,
+                });
+                credits = Some(Credits {
+                    balance: (limit - used).max(0.0),
+                    currency,
+                    used: Some(used),
+                    limit: Some(limit),
+                });
+            }
         }
-        let balance = eu.get("used_credits").and_then(|v| v.as_f64())?;
-        let currency = eu
-            .get("currency")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        Some(Credits { balance, currency })
-    });
+    }
 
     debug!("claude: parsed {} windows", windows.len());
 
@@ -470,8 +522,8 @@ mod tests {
         },
         "extra_usage": {
             "is_enabled": true,
-            "monthly_limit": 100.0,
-            "used_credits": 25.50,
+            "monthly_limit": 10000,
+            "used_credits": 2550,
             "utilization": 25.5,
             "currency": "USD"
         }
@@ -524,7 +576,7 @@ mod tests {
     fn test_happy_path_windows() {
         let snap = parse_usage_response(HAPPY_PATH_RESPONSE, Some("pro")).unwrap();
         assert_eq!(snap.plan.as_deref(), Some("Pro"));
-        assert_eq!(snap.windows.len(), 4);
+        assert_eq!(snap.windows.len(), 5);
 
         let session = &snap.windows[0];
         assert_eq!(session.label, "Session");
@@ -542,8 +594,14 @@ mod tests {
         let sonnet = &snap.windows[3];
         assert_eq!(sonnet.label, "Weekly (Sonnet)");
 
+        let extra = &snap.windows[4];
+        assert_eq!(extra.label, "Extra usage");
+        assert!((extra.used_percent - 25.5).abs() < 0.01);
+
         let credits = snap.credits.unwrap();
-        assert!((credits.balance - 25.50).abs() < 0.01);
+        assert!((credits.used.unwrap() - 25.50).abs() < 0.01);
+        assert!((credits.limit.unwrap() - 100.0).abs() < 0.01);
+        assert!((credits.balance - 74.50).abs() < 0.01);
         assert_eq!(credits.currency.as_deref(), Some("USD"));
     }
 
@@ -595,6 +653,40 @@ mod tests {
         let labels: Vec<&str> = snap.windows.iter().map(|w| w.label.as_str()).collect();
         assert_eq!(labels, vec!["Session", "Weekly", "Weekly (Fable)"]);
         assert!((snap.windows[2].used_percent - 26.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_extra_usage_minor_units_normalized() {
+        let body = r#"{
+            "extra_usage": {
+                "is_enabled": true,
+                "monthly_limit": 2000,
+                "used_credits": 763,
+                "utilization": 38.15,
+                "currency": "EUR"
+            }
+        }"#;
+        let snap = parse_usage_response(body, None).unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Extra usage");
+        let credits = snap.credits.unwrap();
+        assert!((credits.used.unwrap() - 7.63).abs() < 0.01);
+        assert!((credits.limit.unwrap() - 20.0).abs() < 0.01);
+        assert_eq!(credits.currency.as_deref(), Some("EUR"));
+    }
+
+    #[test]
+    fn test_routines_window_parsed() {
+        let body = r#"{
+            "seven_day_routines": {
+                "utilization": 12.0,
+                "resets_at": "2025-01-20T00:00:00Z"
+            }
+        }"#;
+        let snap = parse_usage_response(body, None).unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Daily Routines");
+        assert!((snap.windows[0].used_percent - 12.0).abs() < 0.01);
     }
 
     #[test]
