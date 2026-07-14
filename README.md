@@ -142,6 +142,30 @@ systemctl --user daemon-reload
 systemctl --user enable --now codexbar
 ```
 
+## CLI
+
+The same `codexbar` binary doubles as a command-line usage fetcher (like the
+upstream CodexBar CLI). With no arguments it starts the tray app; pass flags to
+query usage from a terminal or script.
+
+```sh
+codexbar --version
+codexbar --provider claude
+codexbar --provider all --format json --pretty
+codexbar usage --provider codex --no-color
+codexbar gui   # explicit tray launch
+```
+
+| Flag | Description |
+|------|-------------|
+| `--provider <id\|all>` | One provider or every registered provider |
+| `--format text\|json` | Output format (default: `text`) |
+| `--pretty` | Pretty-print JSON |
+| `--no-color` | Disable ANSI colors in text mode |
+
+Exit code `1` when any selected provider fetch fails. Provider selection and
+credentials follow `~/.config/codexbar/config.toml` (same as the tray app).
+
 ## Develop
 
 ```sh

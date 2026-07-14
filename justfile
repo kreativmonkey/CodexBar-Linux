@@ -18,6 +18,14 @@ build-release:
 run:
     cargo run
 
+# run the tray app explicitly
+run-gui:
+    cargo run -- gui
+
+# query usage from the CLI
+usage *args:
+    cargo run -- {{args}}
+
 test:
     cargo test
 
