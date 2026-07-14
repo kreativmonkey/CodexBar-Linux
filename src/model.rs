@@ -96,6 +96,8 @@ pub enum UiEvent {
     /// Show the popover with this provider's view selected; if it is already
     /// visible and showing that provider, hide it (toggle semantics per icon).
     ShowProvider(String),
+    /// Toggle the popover (combined tray icon).
+    TogglePopover,
     Quit,
 }
 

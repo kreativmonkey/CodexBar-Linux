@@ -223,6 +223,22 @@ pub fn run(
                                 }
                             }
                         }
+                        UiEvent::TogglePopover => {
+                            if let Some(window) = window_weak.upgrade() {
+                                if window.is_visible() {
+                                    window.set_visible(false);
+                                } else {
+                                    if selection.borrow().is_none() {
+                                        *selection.borrow_mut() =
+                                            state.borrow().first().map(|d| d.id.to_string());
+                                    }
+                                    if let Some(c) = card_weak.upgrade() {
+                                        rebuild_card(&c, &state, &selection, &cmd_tx_loop);
+                                    }
+                                    window.set_visible(true);
+                                }
+                            }
+                        }
                         UiEvent::Quit => {
                             if let Some(app) = app_weak.upgrade() {
                                 app.quit();
@@ -637,6 +653,7 @@ fn open_config_file() {
 # providers = []   # empty = auto-detect
 # popover_margin_top = 8
 # popover_margin_right = 8
+# tray_icon_mode = \"per_provider\"   # or \"combined\" for a single tray icon
 ";
         if let Err(e) = std::fs::write(&path, defaults) {
             tracing::warn!("cannot write default config: {e}");
