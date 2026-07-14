@@ -186,6 +186,7 @@ fn parse_usage_summary_response(
         label: "Premium (Monthly)".to_string(),
         used_percent: plan_percent_used,
         resets_at: cycle_end,
+        caption: None,
     });
 
     if let Some(auto) = auto_pct {
@@ -193,6 +194,7 @@ fn parse_usage_summary_response(
             label: "Auto".to_string(),
             used_percent: auto,
             resets_at: cycle_end,
+            caption: None,
         });
     }
 
@@ -201,6 +203,7 @@ fn parse_usage_summary_response(
             label: "API (named model)".to_string(),
             used_percent: api,
             resets_at: cycle_end,
+            caption: None,
         });
     }
 

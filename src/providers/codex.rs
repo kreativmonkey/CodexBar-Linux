@@ -138,6 +138,7 @@ fn parse_usage_response(body: &str) -> anyhow::Result<UsageSnapshot> {
             label,
             used_percent,
             resets_at,
+            caption: None,
         });
     }
 

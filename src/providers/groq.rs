@@ -177,11 +177,13 @@ impl Provider for GroqProvider {
                 label: format!("{} req/min", format_decimal(requests_per_min)),
                 used_percent: 0.0,
                 resets_at: None,
+                caption: None,
             },
             RateWindow {
                 label: format!("{} tok/min", format_decimal(tokens_per_min)),
                 used_percent: 0.0,
                 resets_at: None,
+                caption: None,
             },
         ];
 
@@ -190,6 +192,7 @@ impl Provider for GroqProvider {
                 label: format!("{} cache/min", format_decimal(cache_hits_per_min)),
                 used_percent: 0.0,
                 resets_at: None,
+                caption: None,
             });
         }
 
