@@ -27,6 +27,75 @@ nix profile install .
 systemctl --user enable --now codexbar   # unit shipped in contrib/
 ```
 
+## Install (binary)
+
+Pre-built Linux binaries are attached to
+[GitHub Releases](https://github.com/kreativmonkey/CodexBar-Linux/releases)
+for tagged versions (`v0.1.0`, …).
+
+### Download
+
+| Asset | Architecture |
+|-------|--------------|
+| `codexbar-x86_64-linux-v*.tar.gz` | Intel/AMD 64-bit |
+| `codexbar-aarch64-linux-v*.tar.gz` | ARM64 (e.g. Raspberry Pi, Apple Silicon Linux VMs) |
+
+Optional checksum verification:
+
+```sh
+sha256sum -c codexbar-x86_64-linux-v0.1.0.tar.gz.sha256
+```
+
+### Install the binary
+
+```sh
+tar xzf codexbar-x86_64-linux-v0.1.0.tar.gz
+install -Dm755 codexbar-x86_64-linux ~/.local/bin/codexbar
+```
+
+Ensure `~/.local/bin` is on your `PATH`.
+
+### Runtime dependencies
+
+The release binary is dynamically linked against GTK 4 and layer-shell. Install
+the matching packages for your distro:
+
+**Arch Linux**
+
+```sh
+sudo pacman -S gtk4 gtk4-layer-shell
+```
+
+**Fedora**
+
+```sh
+sudo dnf install gtk4 gtk4-layer-shell
+```
+
+**Ubuntu / Debian**
+
+```sh
+sudo apt install libgtk-4-1 libgraphene-1.0-0 libgdk-pixbuf-2.0-0 \
+  libpango-1.0-0 libcairo2 libwayland-client0
+```
+
+`gtk4-layer-shell` is not packaged on all Ubuntu/Debian releases yet. If the
+app fails to start with `libgtk4-layer-shell.so` missing, build and install it
+from source — see `contrib/ci-install-deps.sh` for the exact steps.
+
+You also need a Wayland session with a StatusNotifierItem (system tray) host
+such as Quickshell or Waybar.
+
+### Autostart
+
+```sh
+mkdir -p ~/.config/systemd/user
+sed 's|\.nix-profile/bin/codexbar|.local/bin/codexbar|' contrib/codexbar.service \
+  > ~/.config/systemd/user/codexbar.service
+systemctl --user daemon-reload
+systemctl --user enable --now codexbar
+```
+
 ## Develop
 
 ```sh

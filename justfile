@@ -30,5 +30,9 @@ fmt:
 fmt-check:
     cargo fmt --check
 
+# Debian/Ubuntu build dependencies (release-style builds outside Nix)
+install-deps:
+    bash contrib/ci-install-deps.sh
+
 # local mirror of CI
 check: fmt-check lint test
