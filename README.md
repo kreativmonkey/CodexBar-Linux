@@ -10,6 +10,7 @@ Waybar, …).
 
 - One tray icon per active provider: original provider logo inside a live
   progress ring (green/orange/red by utilization)
+- Optional **combined** tray mode: one icon for all providers (configurable)
 - Click an icon → styled popover with a provider switcher bar, usage bars,
   reset countdowns, plan badge and credits
 - Auto-detects providers from existing CLI logins and API keys; appears/
@@ -182,6 +183,8 @@ refresh_secs = 300
 providers = []            # empty = auto-detect; e.g. ["claude", "codex"]
 popover_margin_top = 8
 popover_margin_right = 8
+# Tray layout: one icon per provider (default) or a single combined icon.
+tray_icon_mode = "per_provider"   # or "combined"
 
 # API keys for key-based providers. Environment variables take precedence:
 # OPENROUTER_API_KEY, OPENCODE_ZEN_API_KEY, OPENAI_ADMIN_KEY/OPENAI_API_KEY, MISTRAL_API_KEY,

@@ -44,6 +44,7 @@ fn run_gui() -> anyhow::Result<()> {
     let (cmd_tx, cmd_rx) = async_channel::unbounded::<EngineCommand>();
 
     let refresh_secs = cfg.refresh_secs;
+    let tray_icon_mode = cfg.tray_icon_mode;
     {
         let ui_tx = ui_tx.clone();
         let cmd_tx = cmd_tx.clone();
@@ -55,7 +56,7 @@ fn run_gui() -> anyhow::Result<()> {
                     // Engine publishes on an internal bus; we fan out to the
                     // GTK thread and to the tray icon.
                     let (bus_tx, bus_rx) = async_channel::unbounded::<UiEvent>();
-                    let tray = match tray::spawn(ui_tx.clone(), cmd_tx).await {
+                    let tray = match tray::spawn(ui_tx.clone(), cmd_tx, tray_icon_mode).await {
                         Ok(t) => Some(t),
                         Err(err) => {
                             tracing::warn!("tray unavailable: {err:#}");

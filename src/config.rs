@@ -3,6 +3,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+/// How provider usage is shown in the system tray.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrayIconMode {
+    /// One StatusNotifierItem per active provider (default).
+    #[default]
+    PerProvider,
+    /// A single icon aggregating utilization across all providers.
+    Combined,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -18,6 +29,8 @@ pub struct Config {
     pub popover_margin_top: i32,
     /// Pixel gap between the right screen edge and the popover.
     pub popover_margin_right: i32,
+    /// Tray layout: one icon per provider, or a single combined icon.
+    pub tray_icon_mode: TrayIconMode,
 }
 
 impl Default for Config {
@@ -28,6 +41,7 @@ impl Default for Config {
             keys: HashMap::new(),
             popover_margin_top: 8,
             popover_margin_right: 8,
+            tray_icon_mode: TrayIconMode::default(),
         }
     }
 }
@@ -72,5 +86,16 @@ impl Config {
             },
             Err(_) => Self::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Config, TrayIconMode};
+
+    #[test]
+    fn tray_icon_mode_deserializes_combined() {
+        let cfg: Config = toml::from_str("tray_icon_mode = \"combined\"").unwrap();
+        assert_eq!(cfg.tray_icon_mode, TrayIconMode::Combined);
     }
 }

@@ -6,6 +6,7 @@ use resvg::tiny_skia::{Color, Paint, PathBuilder, Pixmap, Stroke, Transform};
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use crate::config::TrayIconMode;
 use crate::model::{EngineCommand, ProviderDisplay, ProviderState, UiEvent};
 
 // ---------------------------------------------------------------------------
@@ -161,6 +162,186 @@ fn render_provider_icon(size: i32, display: &ProviderDisplay) -> Option<Icon> {
         height: size,
         data,
     })
+}
+
+/// Render a single combined tray icon aggregating all providers.
+fn render_combined_icon(size: i32, displays: &[ProviderDisplay]) -> Option<Icon> {
+    let (has_error, max_pct) = aggregate_state(displays);
+
+    let sz = size as f32;
+    let cx = sz / 2.0;
+    let cy = sz / 2.0;
+
+    let scale = sz / 22.0;
+    let track_w = 2.5 * scale;
+    let ring_r = cx - track_w / 2.0 - 1.0 * scale;
+
+    let mut pixmap = Pixmap::new(size as u32, size as u32)?;
+
+    // ---- Full-circle track ----
+    {
+        let mut paint = Paint::default();
+        paint.set_color(Color::from_rgba(1.0, 1.0, 1.0, 0.22).unwrap());
+        paint.anti_alias = true;
+        let path = circle_path(cx, cy, ring_r)?;
+        let stroke = Stroke {
+            width: track_w,
+            ..Default::default()
+        };
+        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    }
+
+    match max_pct {
+        Some(pct) => {
+            let (r, g, b) = arc_colour_u8(pct);
+            let fraction = (pct / 100.0).clamp(0.0, 1.0) as f32;
+            let mut paint = Paint::default();
+            paint.set_color(
+                Color::from_rgba(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
+                    .unwrap(),
+            );
+            paint.anti_alias = true;
+            if let Some(arc_path) = arc_path(cx, cy, ring_r, fraction, 64) {
+                let stroke = Stroke {
+                    width: track_w,
+                    line_cap: resvg::tiny_skia::LineCap::Round,
+                    ..Default::default()
+                };
+                pixmap.stroke_path(&arc_path, &paint, &stroke, Transform::identity(), None);
+            }
+
+            let label = format!("{}", pct.round() as i64);
+            draw_centered_digits(&mut pixmap, cx, cy, &label, 3.0 * scale);
+        }
+        None => {
+            let mut paint = Paint::default();
+            paint.set_color(Color::from_rgba(0.6, 0.6, 0.6, 0.5).unwrap());
+            paint.anti_alias = true;
+            if let Some(path) = circle_path(cx, cy, ring_r) {
+                let stroke = Stroke {
+                    width: track_w,
+                    ..Default::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+            }
+        }
+    }
+
+    if has_error {
+        let dot_r = 2.5 * scale;
+        let angle = PI / 4.0;
+        let dot_cx = cx + ring_r * angle.cos();
+        let dot_cy = cy + ring_r * angle.sin();
+        let mut paint = Paint::default();
+        paint.set_color(
+            Color::from_rgba(
+                0xf3 as f32 / 255.0,
+                0x8b as f32 / 255.0,
+                0xa8 as f32 / 255.0,
+                1.0,
+            )
+            .unwrap(),
+        );
+        paint.anti_alias = true;
+        if let Some(path) = filled_circle_path(dot_cx, dot_cy, dot_r) {
+            pixmap.fill_path(
+                &path,
+                &paint,
+                resvg::tiny_skia::FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    let data = pixmap_to_ksni_argb32(pixmap.data(), size as usize, size as usize);
+    Some(Icon {
+        width: size,
+        height: size,
+        data,
+    })
+}
+
+fn aggregate_state(displays: &[ProviderDisplay]) -> (bool, Option<f64>) {
+    let has_error = displays
+        .iter()
+        .any(|d| matches!(d.state, ProviderState::Error(_)));
+    let max_pct = displays.iter().fold(None, |acc: Option<f64>, d| {
+        if let ProviderState::Ready(snap) = &d.state {
+            match (acc, snap.max_used_percent()) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (Some(a), None) => Some(a),
+                (None, b) => b,
+            }
+        } else {
+            acc
+        }
+    });
+    (has_error, max_pct)
+}
+
+/// Minimal 7-segment digits for the combined icon percent label.
+fn draw_centered_digits(pixmap: &mut Pixmap, cx: f32, cy: f32, text: &str, digit_h: f32) {
+    let digit_w = digit_h * 0.55;
+    let gap = digit_h * 0.18;
+    let total_w = text.len() as f32 * digit_w + (text.len().saturating_sub(1) as f32) * gap;
+    let mut x = cx - total_w / 2.0;
+
+    for ch in text.chars() {
+        if let Some(d) = ch.to_digit(10) {
+            draw_7seg_digit(pixmap, x, cy - digit_h / 2.0, digit_w, digit_h, d as u8);
+        }
+        x += digit_w + gap;
+    }
+}
+
+fn draw_7seg_digit(pixmap: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, digit: u8) {
+    let stroke_w = (h * 0.16).max(1.0);
+    let mut paint = Paint::default();
+    paint.set_color(Color::from_rgba(1.0, 1.0, 1.0, 1.0).unwrap());
+    paint.anti_alias = true;
+    let stroke = Stroke {
+        width: stroke_w,
+        line_cap: resvg::tiny_skia::LineCap::Round,
+        ..Default::default()
+    };
+    const MASK: [u8; 10] = [
+        0b1110111, // 0
+        0b0010010, // 1
+        0b1011101, // 2
+        0b1011011, // 3
+        0b0111010, // 4
+        0b1101011, // 5
+        0b1101111, // 6
+        0b1010010, // 7
+        0b1111111, // 8
+        0b1111011, // 9
+    ];
+    let mask = MASK.get(digit as usize).copied().unwrap_or(0);
+    let t = stroke.width * 0.5;
+    let mid_y = y + h / 2.0;
+
+    let segments: [(bool, f32, f32, f32, f32); 7] = [
+        (mask & 0b1000000 != 0, x + t, y, x + w - t, y), // a top
+        (mask & 0b0100000 != 0, x + w, y + t, x + w, mid_y - t), // b upper-right
+        (mask & 0b0010000 != 0, x + w, mid_y + t, x + w, y + h - t), // c lower-right
+        (mask & 0b0001000 != 0, x + t, y + h, x + w - t, y + h), // d bottom
+        (mask & 0b0000100 != 0, x, mid_y + t, x, y + h - t), // e lower-left
+        (mask & 0b0000010 != 0, x, y + t, x, mid_y - t), // f upper-left
+        (mask & 0b0000001 != 0, x + t, mid_y, x + w - t, mid_y), // g middle
+    ];
+
+    for (on, x0, y0, x1, y1) in segments {
+        if !on {
+            continue;
+        }
+        let mut pb = PathBuilder::new();
+        pb.move_to(x0, y0);
+        pb.line_to(x1, y1);
+        if let Some(path) = pb.finish() {
+            pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+        }
+    }
 }
 
 /// Convert a premultiplied RGBA8 buffer (tiny_skia native) to
@@ -328,9 +509,7 @@ fn format_tooltip_description(d: &ProviderDisplay) -> String {
     }
 }
 
-// Keep the multi-provider formatter for the existing tests that call it directly.
-#[cfg(test)]
-fn format_tooltip_description_multi(displays: &[ProviderDisplay]) -> String {
+fn format_combined_tooltip(displays: &[ProviderDisplay]) -> String {
     if displays.is_empty() {
         return "No providers configured".to_string();
     }
@@ -341,7 +520,6 @@ fn format_tooltip_description_multi(displays: &[ProviderDisplay]) -> String {
         .join("\n")
 }
 
-#[cfg(test)]
 fn format_provider_line(d: &ProviderDisplay) -> String {
     match &d.state {
         ProviderState::Loading => format!("{}: loading", d.name),
@@ -363,6 +541,93 @@ fn format_provider_line(d: &ProviderDisplay) -> String {
                 .collect();
             format!("{}: {}", d.name, parts.join(", "))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ksni Tray implementation — combined (single icon)
+// ---------------------------------------------------------------------------
+
+struct CodexBarTray {
+    displays: Vec<ProviderDisplay>,
+    ui_tx: async_channel::Sender<UiEvent>,
+    cmd_tx: async_channel::Sender<EngineCommand>,
+}
+
+impl Tray for CodexBarTray {
+    fn id(&self) -> String {
+        "codexbar".into()
+    }
+
+    fn title(&self) -> String {
+        "CodexBar".into()
+    }
+
+    fn category(&self) -> ksni::Category {
+        ksni::Category::ApplicationStatus
+    }
+
+    fn status(&self) -> ksni::Status {
+        ksni::Status::Active
+    }
+
+    fn activate(&mut self, _x: i32, _y: i32) {
+        if let Err(e) = self.ui_tx.try_send(UiEvent::TogglePopover) {
+            warn!("tray activate: send failed: {e}");
+        }
+    }
+
+    fn tool_tip(&self) -> ToolTip {
+        ToolTip {
+            icon_name: String::new(),
+            icon_pixmap: Vec::new(),
+            title: "CodexBar".into(),
+            description: format_combined_tooltip(&self.displays),
+        }
+    }
+
+    fn icon_pixmap(&self) -> Vec<Icon> {
+        let mut icons = Vec::new();
+        if let Some(icon22) = render_combined_icon(22, &self.displays) {
+            icons.push(icon22);
+        }
+        if let Some(icon44) = render_combined_icon(44, &self.displays) {
+            icons.push(icon44);
+        }
+        icons
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        vec![
+            MenuItem::Standard(ksni::menu::StandardItem {
+                label: "Show".into(),
+                activate: Box::new(|this: &mut Self| {
+                    if let Err(e) = this.ui_tx.try_send(UiEvent::TogglePopover) {
+                        warn!("tray menu Show: send failed: {e}");
+                    }
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Standard(ksni::menu::StandardItem {
+                label: "Refresh all".into(),
+                activate: Box::new(|this: &mut Self| {
+                    if let Err(e) = this.cmd_tx.try_send(EngineCommand::RefreshAll) {
+                        warn!("tray menu RefreshAll: send failed: {e}");
+                    }
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Separator,
+            MenuItem::Standard(ksni::menu::StandardItem {
+                label: "Quit".into(),
+                activate: Box::new(|this: &mut Self| {
+                    if let Err(e) = this.cmd_tx.try_send(EngineCommand::Quit) {
+                        warn!("tray menu Quit: send failed: {e}");
+                    }
+                }),
+                ..Default::default()
+            }),
+        ]
     }
 }
 
@@ -464,28 +729,43 @@ struct ProviderEntry {
     handle: ksni::Handle<ProviderTray>,
 }
 
+struct CombinedEntry {
+    handle: ksni::Handle<CodexBarTray>,
+}
+
+enum TrayBackend {
+    PerProvider(HashMap<String, ProviderEntry>),
+    Combined(Option<CombinedEntry>),
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Handle to all per-provider StatusNotifierItems.
+/// Handle to tray StatusNotifierItem(s).
 pub struct TrayHandle {
-    entries: std::sync::Arc<Mutex<HashMap<String, ProviderEntry>>>,
+    mode: TrayIconMode,
+    backend: std::sync::Arc<Mutex<TrayBackend>>,
     ui_tx: async_channel::Sender<UiEvent>,
     cmd_tx: async_channel::Sender<EngineCommand>,
     /// Warn only once when the SNI bus is unavailable.
     warned_no_bus: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// Spawn the tray manager. Creates no items yet — they appear on first `update()`.
-///
-/// Public signature kept identical to the old single-icon API.
+/// Spawn the tray manager. Per-provider mode creates items on first `update()`;
+/// combined mode spawns a single item on first `update()`.
 pub async fn spawn(
     ui_tx: async_channel::Sender<UiEvent>,
     cmd_tx: async_channel::Sender<EngineCommand>,
+    mode: TrayIconMode,
 ) -> anyhow::Result<TrayHandle> {
+    let backend = match mode {
+        TrayIconMode::PerProvider => TrayBackend::PerProvider(HashMap::new()),
+        TrayIconMode::Combined => TrayBackend::Combined(None),
+    };
     Ok(TrayHandle {
-        entries: std::sync::Arc::new(Mutex::new(HashMap::new())),
+        mode,
+        backend: std::sync::Arc::new(Mutex::new(backend)),
         ui_tx,
         cmd_tx,
         warned_no_bus: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -494,18 +774,22 @@ pub async fn spawn(
 
 impl TrayHandle {
     /// Reconcile tray items with the current provider list.
-    ///
-    /// - New provider → spawn a ksni item.
-    /// - Removed provider → shut down its item.
-    /// - Existing provider → push updated state.
     pub async fn update(&self, displays: &[ProviderDisplay]) {
-        let mut entries = self.entries.lock().await;
+        match self.mode {
+            TrayIconMode::PerProvider => self.update_per_provider(displays).await,
+            TrayIconMode::Combined => self.update_combined(displays).await,
+        }
+    }
 
-        // Determine which ids are now active.
+    async fn update_per_provider(&self, displays: &[ProviderDisplay]) {
+        let mut backend = self.backend.lock().await;
+        let TrayBackend::PerProvider(entries) = &mut *backend else {
+            return;
+        };
+
         let active_ids: HashMap<String, &ProviderDisplay> =
             displays.iter().map(|d| (d.id.to_string(), d)).collect();
 
-        // Remove items whose provider is no longer active.
         let to_remove: Vec<String> = entries
             .keys()
             .filter(|id| !active_ids.contains_key(*id))
@@ -518,10 +802,8 @@ impl TrayHandle {
             }
         }
 
-        // Update existing items and spawn new ones.
         for (id, display) in &active_ids {
             if let Some(entry) = entries.get(id) {
-                // Update existing item with latest display state.
                 let display_clone = (*display).clone();
                 entry
                     .handle
@@ -530,7 +812,6 @@ impl TrayHandle {
                     })
                     .await;
             } else {
-                // Spawn a new item for this provider.
                 let tray = ProviderTray {
                     display: (*display).clone(),
                     ui_tx: self.ui_tx.clone(),
@@ -540,16 +821,47 @@ impl TrayHandle {
                     Ok(handle) => {
                         entries.insert(id.clone(), ProviderEntry { handle });
                     }
-                    Err(e) => {
-                        if !self
-                            .warned_no_bus
-                            .swap(true, std::sync::atomic::Ordering::Relaxed)
-                        {
-                            warn!("StatusNotifierItem unavailable (no SNI watcher on the bus): {e:#}; tray icons will not appear");
-                        }
-                    }
+                    Err(e) => self.warn_no_bus(e),
                 }
             }
+        }
+    }
+
+    async fn update_combined(&self, displays: &[ProviderDisplay]) {
+        let mut backend = self.backend.lock().await;
+        let TrayBackend::Combined(entry) = &mut *backend else {
+            return;
+        };
+
+        let displays = displays.to_vec();
+        if let Some(existing) = entry {
+            existing
+                .handle
+                .update(move |tray| {
+                    tray.displays = displays;
+                })
+                .await;
+        } else {
+            let tray = CodexBarTray {
+                displays,
+                ui_tx: self.ui_tx.clone(),
+                cmd_tx: self.cmd_tx.clone(),
+            };
+            match tray.spawn().await {
+                Ok(handle) => {
+                    *entry = Some(CombinedEntry { handle });
+                }
+                Err(e) => self.warn_no_bus(e),
+            }
+        }
+    }
+
+    fn warn_no_bus(&self, e: ksni::Error) {
+        if !self
+            .warned_no_bus
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            warn!("StatusNotifierItem unavailable (no SNI watcher on the bus): {e:#}; tray icons will not appear");
         }
     }
 }
@@ -717,7 +1029,7 @@ mod tests {
 
     #[test]
     fn tooltip_empty_providers() {
-        let desc = format_tooltip_description_multi(&[]);
+        let desc = format_combined_tooltip(&[]);
         assert!(desc.contains("No providers"), "desc={desc}");
     }
 
@@ -731,7 +1043,7 @@ mod tests {
                 state: ProviderState::Loading,
             },
         ];
-        let desc = format_tooltip_description_multi(&displays);
+        let desc = format_combined_tooltip(&displays);
         assert!(desc.contains("Claude:"), "desc={desc}");
         assert!(desc.contains("OpenAI:"), "desc={desc}");
         assert!(desc.contains('\n'), "should have newline: desc={desc}");
@@ -833,5 +1145,26 @@ mod tests {
             px[0] > 100 && px[1] > 200 && px[2] < 200
         });
         assert!(has_reddish, "error icon should have reddish dot pixels");
+    }
+
+    #[test]
+    fn render_combined_icon_ready_returns_some() {
+        let displays = vec![make_ready("claude", &[("Session", 62.0)])];
+        let icon = render_combined_icon(22, &displays);
+        assert!(icon.is_some());
+        let icon = icon.unwrap();
+        let has_visible = icon.data.chunks_exact(4).any(|px| px[0] > 0);
+        assert!(has_visible, "combined icon should have visible pixels");
+    }
+
+    #[test]
+    fn aggregate_state_picks_highest_percent() {
+        let displays = vec![
+            make_ready("claude", &[("Session", 40.0)]),
+            make_ready("codex", &[("Weekly", 75.0)]),
+        ];
+        let (has_error, max_pct) = aggregate_state(&displays);
+        assert!(!has_error);
+        assert_eq!(max_pct, Some(75.0));
     }
 }
