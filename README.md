@@ -25,7 +25,8 @@ Waybar, …).
 | Gemini | `gemini` | Gemini CLI OAuth (`~/.gemini/oauth_creds.json`) | **Tested** |
 | Cursor | `cursor` | Cursor app DB or `CURSOR_SESSION_TOKEN` cookie | **Tested** |
 | GitHub Copilot | `copilot` | `COPILOT_API_TOKEN` / `[keys] copilot` | Untested |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / `[keys] openrouter` | Untested |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / OpenCode `auth.json` / `[keys] openrouter` | Untested |
+| OpenCode Zen | `opencode_zen` | OpenCode `auth.json` / `OPENCODE_ZEN_API_KEY` / `[keys] opencode_zen` | No billing API |
 | OpenAI | `openai` | `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` | Untested |
 | Mistral | `mistral` | `MISTRAL_API_KEY` / `[keys] mistral` | Untested |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` / `[keys] deepseek` | Untested |
@@ -42,7 +43,9 @@ verification yet. Bug reports welcome; response mapping may need adjustment.
 **No billing API** — the provider can appear when configured, but xAI and
 Perplexity do not expose usage/credits via their public API keys. Grok shows an
 actionable hint; Perplexity requires a browser session cookie (same limitation
-as the macOS original).
+as the macOS original). OpenCode Zen keys are read from the OpenCode CLI
+(`~/.local/share/opencode/auth.json`), but OpenCode does not publish a balance
+endpoint for API keys yet.
 
 Each provider lives in one file under `src/providers/`.
 
@@ -140,10 +143,11 @@ popover_margin_top = 8
 popover_margin_right = 8
 
 # API keys for key-based providers. Environment variables take precedence:
-# OPENROUTER_API_KEY, OPENAI_ADMIN_KEY/OPENAI_API_KEY, MISTRAL_API_KEY,
+# OPENROUTER_API_KEY, OPENCODE_ZEN_API_KEY, OPENAI_ADMIN_KEY/OPENAI_API_KEY, MISTRAL_API_KEY,
 # DEEPSEEK_API_KEY, GROQ_API_KEY, CURSOR_SESSION_TOKEN, COPILOT_API_TOKEN.
 [keys]
 # openrouter = "sk-or-…"
+# opencode_zen = "sk-…"
 # cursor = "<WorkosCursorSessionToken cookie value>"
 ```
 
@@ -157,3 +161,6 @@ Read-only reuse of existing CLI sessions:
 
 No credentials are stored elsewhere; requests go only to the providers' own
 usage endpoints.
+
+OpenCode CLI logins (`~/.local/share/opencode/auth.json`) are reused read-only
+for OpenRouter and OpenCode Zen when no explicit API key is set.

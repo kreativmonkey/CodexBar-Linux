@@ -228,9 +228,8 @@ fn build_snapshot(usage: MonthlyUsage, credits: Option<(f64, String)>) -> UsageS
     }
 
     // Credits come from the /billing/credits endpoint when available.
-    let credits_model = credits.map(|(balance, currency)| Credits {
-        balance,
-        currency: Some(currency),
+    let credits_model = credits.map(|(balance, currency)| {
+        Credits::from_balance(balance, Some(currency))
     });
 
     UsageSnapshot {

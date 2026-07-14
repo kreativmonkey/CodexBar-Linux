@@ -14,6 +14,7 @@ fn svg_bytes(provider_id: &str) -> Option<&'static [u8]> {
         "copilot" => include_bytes!("../assets/provider-icons/copilot.svg"),
         "cursor" => include_bytes!("../assets/provider-icons/cursor.svg"),
         "openrouter" => include_bytes!("../assets/provider-icons/openrouter.svg"),
+        "opencode_zen" => include_bytes!("../assets/provider-icons/opencode.svg"),
         "mistral" => include_bytes!("../assets/provider-icons/mistral.svg"),
         "deepseek" => include_bytes!("../assets/provider-icons/deepseek.svg"),
         "groq" => include_bytes!("../assets/provider-icons/groq.svg"),

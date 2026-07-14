@@ -207,10 +207,10 @@ fn parse_usage_summary_response(
     // On-demand credits: surface when there is a limit or non-zero spend.
     let credits =
         if on_demand_used_cents > 0 || on_demand_limit_cents.map(|l| l > 0).unwrap_or(false) {
-            Some(Credits {
-                balance: cents_to_usd(on_demand_used_cents),
-                currency: Some("USD".to_string()),
-            })
+            Some(Credits::from_balance(
+                cents_to_usd(on_demand_used_cents),
+                Some("USD".to_string()),
+            ))
         } else {
             None
         };

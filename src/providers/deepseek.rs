@@ -56,10 +56,7 @@ fn parse_balance_response(body: &str) -> anyhow::Result<UsageSnapshot> {
     if balance_infos.is_empty() {
         debug!("deepseek: empty balance_infos array");
         return Ok(UsageSnapshot {
-            credits: Some(Credits {
-                balance: 0.0,
-                currency: Some("USD".to_string()),
-            }),
+            credits: Some(Credits::from_balance(0.0, Some("USD".to_string()))),
             fetched_at: Some(chrono::Utc::now()),
             ..Default::default()
         });
@@ -114,10 +111,10 @@ fn parse_balance_response(body: &str) -> anyhow::Result<UsageSnapshot> {
     );
 
     Ok(UsageSnapshot {
-        credits: Some(Credits {
+        credits: Some(Credits::from_balance(
             balance,
-            currency: Some(selected.currency.clone()),
-        }),
+            Some(selected.currency.clone()),
+        )),
         fetched_at: Some(chrono::Utc::now()),
         ..Default::default()
     })

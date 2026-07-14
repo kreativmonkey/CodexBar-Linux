@@ -518,7 +518,12 @@ fn build_tile(display: &ProviderDisplay, newest_fetched_at: &mut Option<DateTime
             // Credits row.
             if let Some(ref credits) = snap.credits {
                 let symbol = credits.currency.as_deref().unwrap_or("$");
-                let credits_text = format!("Credits: {}{:.2}", symbol, credits.balance);
+                let credits_text = match (credits.used, credits.limit) {
+                    (Some(used), Some(limit)) => {
+                        format!("Extra usage: {}{:.2} / {}{:.2}", symbol, used, symbol, limit)
+                    }
+                    _ => format!("Credits: {}{:.2}", symbol, credits.balance),
+                };
                 let credits_lbl = Label::builder()
                     .label(credits_text.as_str())
                     .css_classes(["caption"])
