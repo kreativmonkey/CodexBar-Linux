@@ -79,94 +79,207 @@ fn plan_name(plan_type: Option<&str>) -> Option<String> {
 }
 
 const SECONDS_PER_DAY: i64 = 24 * 3600;
-// "more than 8 days" threshold for monthly window
+const SECONDS_SESSION_THRESHOLD: i64 = 6 * 3600;
 const SECONDS_MONTHLY_THRESHOLD: i64 = 8 * SECONDS_PER_DAY;
 
-fn window_label(field_name: &str, limit_window_seconds: Option<i64>) -> String {
-    match field_name {
-        "primary_window" => {
-            // Session if <= 24h, else Weekly
-            match limit_window_seconds {
-                Some(s) if s <= SECONDS_PER_DAY => "Session".to_string(),
-                _ => "Weekly".to_string(),
-            }
-        }
-        "secondary_window" => {
-            // Weekly or Monthly
-            match limit_window_seconds {
-                Some(s) if s > SECONDS_MONTHLY_THRESHOLD => "Monthly".to_string(),
-                _ => "Weekly".to_string(),
-            }
-        }
-        _ => capitalize(field_name),
+/// Label a limit window from its duration (not primary/secondary field name).
+fn label_from_duration(limit_window_seconds: Option<i64>) -> String {
+    match limit_window_seconds {
+        Some(s) if s > 0 && s <= SECONDS_SESSION_THRESHOLD => "Session".to_string(),
+        Some(s) if s <= SECONDS_MONTHLY_THRESHOLD => "Weekly".to_string(),
+        Some(_) => "Monthly".to_string(),
+        None => "Limit".to_string(),
     }
+}
+
+fn parse_f64(value: &serde_json::Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|n| n as f64))
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+}
+
+fn window_resets_at(w: &serde_json::Value, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    if let Some(ts) = w.get("reset_at").and_then(|v| v.as_i64()) {
+        return Utc.timestamp_opt(ts, 0).single();
+    }
+    let after = w.get("reset_after_seconds").and_then(|v| v.as_i64())?;
+    Some(now + chrono::Duration::seconds(after))
+}
+
+fn parse_rate_window(
+    w: &serde_json::Value,
+    label: String,
+    now: DateTime<Utc>,
+) -> Option<RateWindow> {
+    if w.is_null() {
+        return None;
+    }
+    let used_percent = w.get("used_percent").and_then(parse_f64)?;
+    let limit_window_seconds = w.get("limit_window_seconds").and_then(|v| v.as_i64());
+    Some(RateWindow {
+        label,
+        used_percent: used_percent.clamp(0.0, 100.0),
+        resets_at: window_resets_at(w, now),
+        caption: limit_window_seconds.and_then(window_duration_caption),
+    })
+}
+
+fn window_duration_caption(seconds: i64) -> Option<String> {
+    if seconds <= 0 {
+        return None;
+    }
+    if seconds % SECONDS_PER_DAY == 0 {
+        let days = seconds / SECONDS_PER_DAY;
+        return Some(format!("{days}-day window"));
+    }
+    if seconds % 3600 == 0 {
+        let hours = seconds / 3600;
+        return Some(format!("{hours} h window"));
+    }
+    None
+}
+
+fn push_core_windows(
+    rate_limit: Option<&serde_json::Value>,
+    now: DateTime<Utc>,
+) -> Vec<RateWindow> {
+    let mut collected: Vec<(i64, RateWindow)> = Vec::new();
+    let Some(rate_limit) = rate_limit else {
+        return Vec::new();
+    };
+
+    for field in ["primary_window", "secondary_window"] {
+        let Some(w) = rate_limit.get(field) else {
+            continue;
+        };
+        let limit_window_seconds = w.get("limit_window_seconds").and_then(|v| v.as_i64());
+        let label = label_from_duration(limit_window_seconds);
+        let Some(window) = parse_rate_window(w, label, now) else {
+            continue;
+        };
+        let sort_key = limit_window_seconds.unwrap_or(i64::MAX);
+        collected.push((sort_key, window));
+    }
+
+    collected.sort_by_key(|(seconds, _)| *seconds);
+    collected.into_iter().map(|(_, window)| window).collect()
+}
+
+fn is_spark_limit(entry: &serde_json::Value) -> bool {
+    [entry.get("limit_name"), entry.get("metered_feature")]
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .any(|s| s.to_lowercase().contains("spark"))
+}
+
+fn spark_window_label(limit_window_seconds: Option<i64>, fallback: &str) -> String {
+    match limit_window_seconds {
+        Some(s) if s > 0 && s <= SECONDS_SESSION_THRESHOLD => "Codex Spark 5-hour".to_string(),
+        Some(s) if s >= 6 * SECONDS_PER_DAY => "Codex Spark Weekly".to_string(),
+        _ => fallback.to_string(),
+    }
+}
+
+fn extra_limit_title(entry: &serde_json::Value) -> String {
+    entry
+        .get("limit_name")
+        .or_else(|| entry.get("metered_feature"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(capitalize)
+        .unwrap_or_else(|| "Codex extra limit".to_string())
+}
+
+fn push_additional_windows(json: &serde_json::Value, now: DateTime<Utc>) -> Vec<RateWindow> {
+    let Some(entries) = json
+        .get("additional_rate_limits")
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+
+    let mut windows = Vec::new();
+    let mut seen_spark = [false; 2];
+
+    for entry in entries {
+        let Some(rate_limit) = entry.get("rate_limit") else {
+            continue;
+        };
+        let spark = is_spark_limit(entry);
+
+        for field in ["primary_window", "secondary_window"] {
+            let Some(w) = rate_limit.get(field) else {
+                continue;
+            };
+            let limit_window_seconds = w.get("limit_window_seconds").and_then(|v| v.as_i64());
+            let label = if spark {
+                let kind = match limit_window_seconds {
+                    Some(s) if s > 0 && s <= SECONDS_SESSION_THRESHOLD => 0,
+                    Some(s) if s >= 6 * SECONDS_PER_DAY => 1,
+                    _ if field == "primary_window" => 0,
+                    _ => 1,
+                };
+                if seen_spark[kind] {
+                    continue;
+                }
+                seen_spark[kind] = true;
+                spark_window_label(limit_window_seconds, "Codex Spark")
+            } else {
+                extra_limit_title(entry)
+            };
+            let Some(window) = parse_rate_window(w, label, now) else {
+                continue;
+            };
+            windows.push(window);
+        }
+    }
+
+    windows
+}
+
+fn parse_credits(c: &serde_json::Value) -> Option<Credits> {
+    let has_credits = c
+        .get("has_credits")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let unlimited = c
+        .get("unlimited")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !has_credits || unlimited {
+        return None;
+    }
+    let balance = c.get("balance").and_then(parse_f64)?;
+    Some(Credits::from_balance(balance, None))
 }
 
 fn parse_usage_response(body: &str) -> anyhow::Result<UsageSnapshot> {
     let json: serde_json::Value =
         serde_json::from_str(body).context("usage response is not JSON")?;
 
+    let now = Utc::now();
     let plan_type = json.get("plan_type").and_then(|v| v.as_str());
+    let account = json
+        .get("email")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
-    let mut windows: Vec<RateWindow> = Vec::new();
+    let mut windows = push_core_windows(json.get("rate_limit"), now);
+    windows.extend(push_additional_windows(&json, now));
 
-    let rate_limit = json.get("rate_limit");
-
-    for field_name in &["primary_window", "secondary_window"] {
-        let Some(w) = rate_limit.and_then(|rl| rl.get(field_name)) else {
-            continue;
-        };
-        if w.is_null() {
-            continue;
-        }
-
-        let used_percent = match w.get("used_percent").and_then(|v| v.as_f64()) {
-            Some(p) => p.clamp(0.0, 100.0),
-            None => continue,
-        };
-
-        let limit_window_seconds = w.get("limit_window_seconds").and_then(|v| v.as_i64());
-
-        let resets_at: Option<DateTime<Utc>> = w
-            .get("reset_at")
-            .and_then(|v| v.as_i64())
-            .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
-
-        let label = window_label(field_name, limit_window_seconds);
-
-        windows.push(RateWindow {
-            label,
-            used_percent,
-            resets_at,
-            caption: None,
-        });
-    }
-
-    // credits
-    let credits = json.get("credits").and_then(|c| {
-        let has_credits = c
-            .get("has_credits")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let unlimited = c
-            .get("unlimited")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !has_credits || unlimited {
-            return None;
-        }
-        let balance = c.get("balance").and_then(|v| v.as_f64())?;
-        Some(Credits::from_balance(balance, None))
-    });
+    let credits = json.get("credits").and_then(parse_credits);
 
     debug!("codex: parsed {} windows", windows.len());
 
     Ok(UsageSnapshot {
         plan: plan_name(plan_type),
-        account: None,
+        account,
         windows,
         credits,
-        fetched_at: Some(Utc::now()),
+        fetched_at: Some(now),
     })
 }
 
@@ -372,33 +485,96 @@ mod tests {
     }
 
     #[test]
-    fn test_session_vs_weekly_window_label() {
-        // <= 24h = Session
-        assert_eq!(window_label("primary_window", Some(3600)), "Session");
+    fn test_label_from_duration() {
+        assert_eq!(label_from_duration(Some(3600)), "Session");
         assert_eq!(
-            window_label("primary_window", Some(SECONDS_PER_DAY)),
+            label_from_duration(Some(SECONDS_SESSION_THRESHOLD)),
             "Session"
         );
-        // > 24h = Weekly
         assert_eq!(
-            window_label("primary_window", Some(SECONDS_PER_DAY + 1)),
+            label_from_duration(Some(SECONDS_SESSION_THRESHOLD + 1)),
             "Weekly"
         );
-        assert_eq!(window_label("primary_window", None), "Weekly");
-
-        // secondary: <= 8 days = Weekly, > 8 days = Monthly
+        assert_eq!(label_from_duration(Some(7 * SECONDS_PER_DAY)), "Weekly");
         assert_eq!(
-            window_label("secondary_window", Some(7 * SECONDS_PER_DAY)),
-            "Weekly"
-        );
-        assert_eq!(
-            window_label("secondary_window", Some(SECONDS_MONTHLY_THRESHOLD)),
-            "Weekly"
-        );
-        assert_eq!(
-            window_label("secondary_window", Some(SECONDS_MONTHLY_THRESHOLD + 1)),
+            label_from_duration(Some(SECONDS_MONTHLY_THRESHOLD + 1)),
             "Monthly"
         );
+        assert_eq!(label_from_duration(None), "Limit");
+    }
+
+    #[test]
+    fn test_plus_weekly_only_primary_window() {
+        let body = r#"{
+            "plan_type": "plus",
+            "email": "user@example.com",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 10,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 601137,
+                    "reset_at": 1784666295
+                },
+                "secondary_window": null
+            },
+            "additional_rate_limits": null,
+            "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
+        }"#;
+        let snap = parse_usage_response(body).unwrap();
+        assert_eq!(snap.plan.as_deref(), Some("Plus"));
+        assert_eq!(snap.account.as_deref(), Some("user@example.com"));
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Weekly");
+        assert_eq!(snap.windows[0].caption.as_deref(), Some("7-day window"));
+    }
+
+    #[test]
+    fn test_additional_spark_limits() {
+        let body = r#"{
+            "plan_type": "pro",
+            "rate_limit": {
+                "primary_window": { "used_percent": 22, "reset_at": 1766948068, "limit_window_seconds": 18000 },
+                "secondary_window": { "used_percent": 43, "reset_at": 1767407914, "limit_window_seconds": 604800 }
+            },
+            "additional_rate_limits": [
+                {
+                    "limit_name": "GPT-5.3-Codex-Spark",
+                    "metered_feature": "gpt_5_3_codex_spark",
+                    "rate_limit": {
+                        "primary_window": { "used_percent": 30, "reset_at": 1766948068, "limit_window_seconds": 18000 },
+                        "secondary_window": { "used_percent": 100, "reset_at": 1767407914, "limit_window_seconds": 604800 }
+                    }
+                }
+            ]
+        }"#;
+        let snap = parse_usage_response(body).unwrap();
+        assert_eq!(snap.windows.len(), 4);
+        assert_eq!(snap.windows[0].label, "Session");
+        assert_eq!(snap.windows[1].label, "Weekly");
+        assert_eq!(snap.windows[2].label, "Codex Spark 5-hour");
+        assert_eq!(snap.windows[3].label, "Codex Spark Weekly");
+    }
+
+    #[test]
+    fn test_reset_after_seconds_fallback() {
+        let body = r#"{
+            "plan_type": "plus",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 5,
+                    "limit_window_seconds": 10800,
+                    "reset_after_seconds": 7200
+                }
+            }
+        }"#;
+        let snap = parse_usage_response(body).unwrap();
+        assert!(snap.windows[0].resets_at.is_some());
+    }
+
+    #[test]
+    fn test_session_vs_weekly_window_label() {
+        assert_eq!(label_from_duration(Some(3600)), "Session");
+        assert_eq!(label_from_duration(Some(SECONDS_PER_DAY)), "Weekly");
     }
 
     #[test]
