@@ -1,8 +1,10 @@
+mod cli;
 mod config;
 mod engine;
 mod icons;
 mod model;
 mod providers;
+mod reset_time;
 mod tray;
 mod ui;
 
@@ -10,6 +12,19 @@ use config::Config;
 use model::{EngineCommand, UiEvent};
 
 fn main() -> anyhow::Result<()> {
+    if should_run_cli() {
+        return cli::run();
+    }
+    run_gui()
+}
+
+/// Tray mode when invoked without CLI flags; `codexbar usage` and friends use the CLI.
+fn should_run_cli() -> bool {
+    let mut args = std::env::args().skip(1);
+    matches!(args.next().as_deref(), Some(arg) if arg != "gui" && arg != "--gui")
+}
+
+fn run_gui() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
