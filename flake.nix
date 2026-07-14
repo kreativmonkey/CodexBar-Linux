@@ -49,7 +49,7 @@
       packages = forAllSystems (pkgs: rec {
         codexbar = pkgs.rustPlatform.buildRustPackage {
           pname = "codexbar";
-          version = "26.7.0";
+          version = "26.7.1";
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = nativeDeps pkgs;
