@@ -620,7 +620,7 @@ fn format_reset_time(resets_at: DateTime<Utc>) -> String {
         }
     } else {
         let local: chrono::DateTime<Local> = resets_at.into();
-        format!("resets {} {}", local.format("%a"), local.format("%H:%M"))
+        format!("resets {} {}", local.format("%b %d"), local.format("%H:%M"))
     }
 }
 
