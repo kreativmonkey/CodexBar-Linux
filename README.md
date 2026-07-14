@@ -25,13 +25,13 @@ Waybar, …).
 | Gemini | `gemini` | Gemini CLI OAuth (`~/.gemini/oauth_creds.json`) | **Tested** |
 | Cursor | `cursor` | Cursor app DB or `CURSOR_SESSION_TOKEN` cookie | **Tested** |
 | GitHub Copilot | `copilot` | `COPILOT_API_TOKEN` / `[keys] copilot` | Untested |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / OpenCode `auth.json` / `[keys] openrouter` | Untested |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / OpenCode or Pi `auth.json` / `[keys] openrouter` | Untested |
 | OpenCode Zen | `opencode_zen` | OpenCode `auth.json` / `OPENCODE_ZEN_API_KEY` / `[keys] opencode_zen` | No billing API |
-| OpenAI | `openai` | `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` | Untested |
-| Mistral | `mistral` | `MISTRAL_API_KEY` / `[keys] mistral` | Untested |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` / `[keys] deepseek` | Untested |
-| Groq | `groq` | `GROQ_API_KEY` / `[keys] groq` | Untested |
-| Grok | `grok` | `XAI_API_KEY` (inference only) | No billing API |
+| OpenAI | `openai` | `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` / OpenCode or Pi `auth.json` | Untested |
+| Mistral | `mistral` | `MISTRAL_API_KEY` / OpenCode or Pi `auth.json` / `[keys] mistral` | Untested |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` / OpenCode or Pi `auth.json` / `[keys] deepseek` | Untested |
+| Groq | `groq` | `GROQ_API_KEY` / OpenCode or Pi `auth.json` / `[keys] groq` | Untested |
+| Grok | `grok` | `XAI_API_KEY` / Pi `auth.json` (`xai`) (inference only) | No billing API |
 | Perplexity | `perplexity` | Session cookie (no API-key billing endpoint) | No billing API |
 
 **Tested** — verified against live accounts on Linux (usage bars, resets, token
@@ -179,5 +179,7 @@ Read-only reuse of existing CLI sessions:
 No credentials are stored elsewhere; requests go only to the providers' own
 usage endpoints.
 
-OpenCode CLI logins (`~/.local/share/opencode/auth.json`) are reused read-only
-for OpenRouter and OpenCode Zen when no explicit API key is set.
+OpenCode CLI logins (`~/.local/share/opencode/auth.json`) and Pi agent logins
+(`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json`) are reused
+read-only for OpenRouter, OpenCode Zen, and other API-key providers when no
+explicit key is set. OpenCode is checked before Pi.

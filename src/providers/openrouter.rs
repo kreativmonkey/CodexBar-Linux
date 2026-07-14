@@ -17,7 +17,7 @@ impl OpenRouterProvider {
 
 fn api_key() -> Option<String> {
     config::api_key("openrouter", "OPENROUTER_API_KEY")
-        .or_else(super::opencode_auth::openrouter_key)
+        .or_else(|| super::cli_agent_auth::provider_api_key("openrouter"))
 }
 
 // HTTP transport shared with the Claude provider.
@@ -187,7 +187,8 @@ impl Provider for OpenRouterProvider {
     async fn fetch(&self) -> anyhow::Result<UsageSnapshot> {
         let key = api_key().context(
             "OpenRouter API key not set — set OPENROUTER_API_KEY, add \
-             [keys] openrouter to config.toml, or run `opencode` → /connect → OpenRouter",
+             [keys] openrouter to config.toml, or connect OpenRouter in \
+             OpenCode (`opencode`) or Pi (`pi`) so auth.json is populated",
         )?;
 
         let auth = format!("Bearer {}", key);

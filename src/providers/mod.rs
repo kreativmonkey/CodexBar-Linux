@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod cli_agent_auth;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
@@ -12,6 +13,7 @@ pub mod opencode_auth;
 pub mod opencode_zen;
 pub mod openrouter;
 pub mod perplexity;
+pub mod pi_auth;
 
 use crate::model::UsageSnapshot;
 use std::sync::Arc;

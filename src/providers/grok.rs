@@ -13,6 +13,7 @@ impl GrokProvider {
 
 fn api_key() -> Option<String> {
     crate::config::api_key("grok", "XAI_API_KEY")
+        .or_else(|| super::cli_agent_auth::provider_api_key("xai"))
 }
 
 // ── Provider impl ─────────────────────────────────────────────────────────────

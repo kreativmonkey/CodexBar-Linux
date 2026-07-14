@@ -16,6 +16,7 @@ impl DeepSeekProvider {
 
 fn api_key() -> Option<String> {
     crate::config::api_key("deepseek", "DEEPSEEK_API_KEY")
+        .or_else(|| super::cli_agent_auth::provider_api_key("deepseek"))
 }
 
 // ── response parsing ──────────────────────────────────────────────────────────
