@@ -29,12 +29,12 @@ else
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' EXIT
   git clone --depth 1 https://github.com/wmww/gtk4-layer-shell "$tmpdir/gtk4-layer-shell"
-  meson setup "$tmpdir/gtk4-layer-shell/build" \
+  meson setup "$tmpdir/build" "$tmpdir/gtk4-layer-shell" \
     --prefix=/usr \
     -Dexamples=false \
     -Dtests=false \
     -Dvapi=false \
     -Dintrospection=false
-  sudo ninja -C "$tmpdir/gtk4-layer-shell/build" install
+  sudo ninja -C "$tmpdir/build" install
   sudo ldconfig
 fi
