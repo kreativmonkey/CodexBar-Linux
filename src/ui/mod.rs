@@ -675,10 +675,7 @@ mod tests {
     fn format_reset_time_within_day_uses_countdown() {
         let now = Utc.with_ymd_and_hms(2026, 7, 14, 10, 0, 0).unwrap();
         let resets_at = now + chrono::Duration::hours(3) + chrono::Duration::minutes(15);
-        assert_eq!(
-            format_reset_time_at(resets_at, now),
-            "resets in 3 h 15 m"
-        );
+        assert_eq!(format_reset_time_at(resets_at, now), "resets in 3 h 15 m");
     }
 
     #[test]
