@@ -662,6 +662,7 @@ mod tests {
                 label: label.to_string(),
                 used_percent: *pct,
                 resets_at: None,
+                caption: None,
             })
             .collect();
         ProviderDisplay {

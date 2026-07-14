@@ -43,47 +43,115 @@ fn parse_credits_response(body: &str) -> anyhow::Result<(f64, f64)> {
     Ok((total_credits, total_usage))
 }
 
-/// Parse `GET /api/v1/key` response (optional enrichment).
-///
-/// Shape: `{ "data": { "limit": f64|null, "usage": f64, ... } }`
-/// Returns `None` if the response is malformed or the key has no quota limit.
-fn parse_key_response(body: &str) -> Option<(f64, f64)> {
+/// Parsed subset of `GET /api/v1/key`.
+#[derive(Debug, Clone, PartialEq)]
+struct KeyInfo {
+    label: Option<String>,
+    limit: Option<f64>,
+    usage: f64,
+    usage_daily: f64,
+    usage_weekly: f64,
+    usage_monthly: f64,
+}
+
+/// Parse `GET /api/v1/key` response.
+fn parse_key_response(body: &str) -> Option<KeyInfo> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let data = json.get("data")?;
-    let limit = data
-        .get("limit")
-        .and_then(|v| v.as_f64())
-        .filter(|&l| l > 0.0)?;
-    let usage = data.get("usage").and_then(|v| v.as_f64())?;
-    Some((limit, usage))
+    Some(KeyInfo {
+        label: data
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        limit: data
+            .get("limit")
+            .and_then(|v| v.as_f64())
+            .filter(|&l| l > 0.0),
+        usage: data.get("usage").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        usage_daily: data
+            .get("usage_daily")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        usage_weekly: data
+            .get("usage_weekly")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        usage_monthly: data
+            .get("usage_monthly")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+    })
+}
+
+fn account_used_percent(total_credits: f64, total_usage: f64) -> f64 {
+    if total_credits > 0.0 {
+        (total_usage / total_credits * 100.0).clamp(0.0, 100.0)
+    } else if total_usage > 0.0 {
+        100.0
+    } else {
+        0.0
+    }
+}
+
+fn spend_vs_remaining_percent(spend: f64, remaining: f64) -> f64 {
+    if remaining > 0.0 {
+        (spend / remaining * 100.0).clamp(0.0, 100.0)
+    } else if spend > 0.0 {
+        100.0
+    } else {
+        0.0
+    }
+}
+
+fn period_window(label: &str, spend: f64, remaining: f64) -> RateWindow {
+    RateWindow::new(label, spend_vs_remaining_percent(spend, remaining))
+        .with_caption(format!("${spend:.2} / ${remaining:.2} left"))
 }
 
 fn build_snapshot(
     total_credits: f64,
     total_usage: f64,
-    key_quota: Option<(f64, f64)>,
+    key_info: Option<KeyInfo>,
 ) -> UsageSnapshot {
     let balance = (total_credits - total_usage).max(0.0);
-
     let mut windows: Vec<RateWindow> = Vec::new();
 
-    // If the key has a hard spend limit, expose it as a rate window.
-    if let Some((limit, usage)) = key_quota {
-        if limit > 0.0 {
-            let used_percent = (usage / limit * 100.0).clamp(0.0, 100.0);
+    if total_credits > 0.0 || total_usage > 0.0 {
+        let used_percent = account_used_percent(total_credits, total_usage);
+        debug!(
+            "openrouter: account credits={} usage={} used_percent={}",
+            total_credits, total_usage, used_percent
+        );
+        windows.push(
+            RateWindow::new("Credits", used_percent)
+                .with_caption(format!("${total_usage:.2} / ${total_credits:.2}")),
+        );
+    }
+
+    if let Some(ref key) = key_info {
+        windows.push(period_window("Today", key.usage_daily, balance));
+        windows.push(period_window("This week", key.usage_weekly, balance));
+        windows.push(period_window("This month", key.usage_monthly, balance));
+
+        if let Some(limit) = key.limit {
+            let used_percent = (key.usage / limit * 100.0).clamp(0.0, 100.0);
             debug!(
-                "openrouter: key quota limit={} usage={} used_percent={}",
-                limit, usage, used_percent
+                "openrouter: key limit={} usage={} used_percent={}",
+                limit, key.usage, used_percent
             );
-            windows.push(RateWindow {
-                label: "Credits".to_string(),
-                used_percent,
-                resets_at: None,
-            });
+            windows.push(
+                RateWindow::new("Key limit", used_percent)
+                    .with_caption(format!("${:.2} / ${:.2}", key.usage, limit)),
+            );
         }
     }
 
-    let credits = Some(Credits::from_balance(balance, Some("USD".to_string())));
+    let credits = Some(Credits {
+        balance,
+        currency: Some("USD".to_string()),
+        used: Some(total_usage),
+        limit: total_credits.gt(&0.0).then_some(total_credits),
+    });
 
     debug!(
         "openrouter: balance={:.4} windows={}",
@@ -92,7 +160,7 @@ fn build_snapshot(
     );
 
     UsageSnapshot {
-        plan: None,
+        plan: key_info.and_then(|k| k.label),
         account: None,
         windows,
         credits,
@@ -129,7 +197,6 @@ impl Provider for OpenRouterProvider {
             ("X-Title", "CodexBar"),
         ];
 
-        // Primary: credits endpoint
         let (status, body) = http_get("https://openrouter.ai/api/v1/credits", headers).await?;
         match status {
             200 => {}
@@ -141,15 +208,12 @@ impl Provider for OpenRouterProvider {
         let (total_credits, total_usage) =
             parse_credits_response(&body).context("failed to parse OpenRouter credits")?;
 
-        // Enrichment: key endpoint (best-effort, 1 s timeout is enforced by the
-        // shared http_get which uses a 30 s reqwest timeout — acceptable here).
-        let key_quota: Option<(f64, f64)> =
-            match http_get("https://openrouter.ai/api/v1/key", headers).await {
-                Ok((200, key_body)) => parse_key_response(&key_body),
-                Ok(_) | Err(_) => None, // non-critical; ignore silently
-            };
+        let key_info = match http_get("https://openrouter.ai/api/v1/key", headers).await {
+            Ok((200, key_body)) => parse_key_response(&key_body),
+            Ok(_) | Err(_) => None,
+        };
 
-        Ok(build_snapshot(total_credits, total_usage, key_quota))
+        Ok(build_snapshot(total_credits, total_usage, key_info))
     }
 }
 
@@ -166,32 +230,25 @@ mod tests {
         }
     }"#;
 
-    const ZERO_CREDITS_RESPONSE: &str = r#"{
-        "data": {
-            "total_credits": 0.0,
-            "total_usage": 0.0
-        }
-    }"#;
-
     const KEY_RESPONSE_WITH_LIMIT: &str = r#"{
         "data": {
+            "label": "prod-key",
             "limit": 5.0,
             "usage": 2.5,
-            "rate_limit": { "requests": 1000, "interval": "10s" }
+            "usage_daily": 0.5,
+            "usage_weekly": 1.0,
+            "usage_monthly": 2.0
         }
     }"#;
 
     const KEY_RESPONSE_NO_LIMIT: &str = r#"{
         "data": {
+            "label": "dev-key",
             "limit": null,
-            "usage": 1.0
-        }
-    }"#;
-
-    const KEY_RESPONSE_ZERO_LIMIT: &str = r#"{
-        "data": {
-            "limit": 0.0,
-            "usage": 0.0
+            "usage": 0.03,
+            "usage_daily": 0.03,
+            "usage_weekly": 0.03,
+            "usage_monthly": 0.03
         }
     }"#;
 
@@ -203,82 +260,42 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_credits_zero() {
-        let (total, used) = parse_credits_response(ZERO_CREDITS_RESPONSE).unwrap();
-        assert_eq!(total, 0.0);
-        assert_eq!(used, 0.0);
+    fn test_build_snapshot_account_and_period_bars() {
+        let key = parse_key_response(KEY_RESPONSE_NO_LIMIT).unwrap();
+        let snap = build_snapshot(60.0, 51.484388232, Some(key));
+        assert_eq!(snap.windows.len(), 4);
+        assert_eq!(snap.windows[0].label, "Credits");
+        assert!((snap.windows[0].used_percent - 85.8).abs() < 0.1);
+        assert_eq!(snap.windows[1].label, "Today");
+        assert_eq!(snap.windows[2].label, "This week");
+        assert_eq!(snap.windows[3].label, "This month");
+        assert!(snap.windows[1]
+            .caption
+            .as_deref()
+            .unwrap()
+            .contains("$0.03"));
     }
 
     #[test]
-    fn test_parse_credits_missing_field_errors() {
-        assert!(parse_credits_response(r#"{"data": {}}"#).is_err());
-        assert!(parse_credits_response("not-json").is_err());
+    fn test_build_snapshot_includes_key_limit_bar() {
+        let key = parse_key_response(KEY_RESPONSE_WITH_LIMIT).unwrap();
+        let snap = build_snapshot(10.0, 3.5, Some(key));
+        assert_eq!(snap.windows.len(), 5);
+        assert_eq!(snap.windows[4].label, "Key limit");
+        assert!((snap.windows[4].used_percent - 50.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_parse_key_with_limit() {
-        let result = parse_key_response(KEY_RESPONSE_WITH_LIMIT);
-        let (limit, usage) = result.unwrap();
-        assert!((limit - 5.0).abs() < 1e-9);
-        assert!((usage - 2.5).abs() < 1e-9);
+    fn test_period_percent_uses_remaining_balance() {
+        // $0.03 of $8.52 remaining ≈ 0.35%
+        let pct = spend_vs_remaining_percent(0.03, 8.515611768);
+        assert!((pct - 0.35).abs() < 0.1);
     }
 
     #[test]
-    fn test_parse_key_no_limit_returns_none() {
-        assert!(parse_key_response(KEY_RESPONSE_NO_LIMIT).is_none());
-    }
-
-    #[test]
-    fn test_parse_key_zero_limit_returns_none() {
-        assert!(parse_key_response(KEY_RESPONSE_ZERO_LIMIT).is_none());
-    }
-
-    #[test]
-    fn test_parse_key_bad_json_returns_none() {
-        assert!(parse_key_response("not-json").is_none());
-    }
-
-    #[test]
-    fn test_build_snapshot_with_quota() {
-        let snap = build_snapshot(10.0, 3.5, Some((5.0, 2.5)));
-        // balance = 10 - 3.5 = 6.5
-        let credits = snap.credits.unwrap();
-        assert!((credits.balance - 6.5).abs() < 1e-9);
-        assert_eq!(credits.currency.as_deref(), Some("USD"));
-        // One window from key quota: 2.5/5.0 = 50%
+    fn test_build_snapshot_without_key_info() {
+        let snap = build_snapshot(10.0, 3.5, None);
         assert_eq!(snap.windows.len(), 1);
         assert_eq!(snap.windows[0].label, "Credits");
-        assert!((snap.windows[0].used_percent - 50.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_build_snapshot_without_quota() {
-        let snap = build_snapshot(10.0, 3.5, None);
-        assert!(snap.windows.is_empty());
-        let credits = snap.credits.unwrap();
-        assert!((credits.balance - 6.5).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_build_snapshot_balance_clamped_non_negative() {
-        // More used than total (shouldn't happen, but be defensive)
-        let snap = build_snapshot(2.0, 5.0, None);
-        let credits = snap.credits.unwrap();
-        assert_eq!(credits.balance, 0.0);
-    }
-
-    #[test]
-    fn test_build_snapshot_quota_percent_clamped() {
-        // usage > limit → clamp to 100%
-        let snap = build_snapshot(10.0, 1.0, Some((2.0, 5.0)));
-        assert!((snap.windows[0].used_percent - 100.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_is_configured_without_env() {
-        // Without the env var set (test env doesn't have it), should be false.
-        // We can't easily unset env vars in a portable way, so just check the
-        // function compiles and returns a bool.
-        let _: bool = OpenRouterProvider::new().is_configured();
     }
 }

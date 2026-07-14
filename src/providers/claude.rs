@@ -293,6 +293,7 @@ fn parse_usage_response(
                 label: label.to_string(),
                 used_percent: utilization,
                 resets_at,
+                caption: None,
             });
         }
     }
@@ -318,6 +319,7 @@ fn parse_usage_response(
                 label: label.to_string(),
                 used_percent: utilization,
                 resets_at,
+                caption: None,
             });
         }
     }
@@ -367,6 +369,7 @@ fn parse_usage_response(
                 label,
                 used_percent: percent,
                 resets_at,
+                caption: None,
             });
         }
     }
@@ -404,6 +407,7 @@ fn parse_usage_response(
                     label: "Extra usage".to_string(),
                     used_percent: utilization,
                     resets_at: None,
+                    caption: None,
                 });
                 credits = Some(Credits {
                     balance: (limit - used).max(0.0),

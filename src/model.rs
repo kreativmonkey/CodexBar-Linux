@@ -8,6 +8,24 @@ pub struct RateWindow {
     /// Utilization in percent, 0.0..=100.0.
     pub used_percent: f64,
     pub resets_at: Option<DateTime<Utc>>,
+    /// Optional detail line under the bar (e.g. dollar spend vs remaining).
+    pub caption: Option<String>,
+}
+
+impl RateWindow {
+    pub fn new(label: impl Into<String>, used_percent: f64) -> Self {
+        Self {
+            label: label.into(),
+            used_percent,
+            resets_at: None,
+            caption: None,
+        }
+    }
+
+    pub fn with_caption(mut self, caption: impl Into<String>) -> Self {
+        self.caption = Some(caption.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

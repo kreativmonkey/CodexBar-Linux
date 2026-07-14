@@ -223,6 +223,7 @@ fn build_snapshot(usage: MonthlyUsage, credits: Option<(f64, String)>) -> UsageS
                 label: "Month".to_string(),
                 used_percent,
                 resets_at: None,
+                caption: None,
             });
         }
     }

@@ -503,7 +503,15 @@ fn build_tile(display: &ProviderDisplay, newest_fetched_at: &mut Option<DateTime
                 bar.set_css_classes(&["bar", sev]);
                 tile.append(&bar);
 
-                // Caption: reset countdown.
+                // Caption: reset countdown or custom detail.
+                if let Some(caption) = &window.caption {
+                    let caption_lbl = Label::builder()
+                        .label(caption.as_str())
+                        .css_classes(["caption"])
+                        .halign(gtk4::Align::Start)
+                        .build();
+                    tile.append(&caption_lbl);
+                }
                 if let Some(resets_at) = window.resets_at {
                     let caption_text = format_reset_time(resets_at);
                     let caption = Label::builder()
@@ -519,12 +527,10 @@ fn build_tile(display: &ProviderDisplay, newest_fetched_at: &mut Option<DateTime
             if let Some(ref credits) = snap.credits {
                 let symbol = credits.currency.as_deref().unwrap_or("$");
                 let credits_text = match (credits.used, credits.limit) {
-                    (Some(used), Some(limit)) => {
-                        format!(
-                            "Extra usage: {}{:.2} / {}{:.2}",
-                            symbol, used, symbol, limit
-                        )
-                    }
+                    (Some(used), Some(limit)) => format!(
+                        "{}{:.2} / {}{:.2} ({}{:.2} left)",
+                        symbol, used, symbol, limit, symbol, credits.balance
+                    ),
                     _ => format!("Credits: {}{:.2}", symbol, credits.balance),
                 };
                 let credits_lbl = Label::builder()

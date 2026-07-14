@@ -183,6 +183,7 @@ fn build_snapshot_from_grants(
         label: "Credits".to_string(),
         used_percent,
         resets_at: None,
+        caption: None,
     }];
 
     UsageSnapshot {

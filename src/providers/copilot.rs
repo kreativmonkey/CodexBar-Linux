@@ -236,6 +236,7 @@ fn parse_quota_window(
         label: label.to_string(),
         used_percent,
         resets_at,
+        caption: None,
     })
 }
 
