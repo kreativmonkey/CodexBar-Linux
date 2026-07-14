@@ -39,6 +39,7 @@ impl MistralProvider {
 
 fn api_key() -> Option<String> {
     config::api_key("mistral", "MISTRAL_API_KEY")
+        .or_else(|| super::cli_agent_auth::provider_api_key("mistral"))
 }
 
 // HTTP transport shared with the Claude provider.

@@ -37,7 +37,9 @@ fn admin_key() -> Option<String> {
 }
 
 fn any_key() -> Option<String> {
-    admin_key().or_else(|| config::api_key("openai", "OPENAI_API_KEY"))
+    admin_key()
+        .or_else(|| config::api_key("openai", "OPENAI_API_KEY"))
+        .or_else(|| super::cli_agent_auth::provider_api_key("openai"))
 }
 
 // HTTP transport shared with the Claude provider.
