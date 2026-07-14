@@ -1,7 +1,7 @@
 use crate::model::{Credits, RateWindow, UsageSnapshot};
 use crate::providers::Provider;
 use anyhow::{bail, Context};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use tracing::debug;
 
 // HTTP transport shared with the Claude provider.
@@ -123,10 +123,7 @@ fn parse_usage_summary_response(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let billing_cycle_end = json
-        .get("billingCycleEnd")
-        .and_then(|v| v.as_str())
-        .and_then(parse_iso8601);
+    let billing_cycle_end = billing_cycle_end_from_json(&json);
 
     let individual = json.get("individualUsage");
     let plan_obj = individual.and_then(|u| u.get("plan"));
@@ -266,10 +263,51 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-fn parse_iso8601(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc))
+/// Parse `billingCycleEnd` from the usage-summary payload.
+///
+/// Cursor has returned this field as ISO-8601 strings, Unix millisecond timestamps
+/// (JSON number or numeric string), and — in older responses — nested under
+/// `billingCycle.end` / `billing_cycle.end`.
+fn billing_cycle_end_from_json(json: &serde_json::Value) -> Option<DateTime<Utc>> {
+    json.get("billingCycleEnd")
+        .and_then(parse_cursor_timestamp)
+        .or_else(|| {
+            json.get("billingCycle")
+                .or_else(|| json.get("billing_cycle"))
+                .and_then(|bc| bc.get("end"))
+                .and_then(parse_cursor_timestamp)
+        })
+}
+
+fn parse_cursor_timestamp(v: &serde_json::Value) -> Option<DateTime<Utc>> {
+    match v {
+        serde_json::Value::String(s) => parse_flexible_time_str(s),
+        serde_json::Value::Number(n) => n.as_i64().and_then(parse_unix_timestamp),
+        _ => None,
+    }
+}
+
+fn parse_flexible_time_str(s: &str) -> Option<DateTime<Utc>> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    s.parse::<i64>().ok().and_then(parse_unix_timestamp)
+}
+
+fn parse_unix_timestamp(ts: i64) -> Option<DateTime<Utc>> {
+    if ts <= 0 {
+        return None;
+    }
+    let (secs, nsecs) = if ts >= 1_000_000_000_000 {
+        (ts / 1000, ((ts % 1000) * 1_000_000) as u32)
+    } else {
+        (ts, 0)
+    };
+    Utc.timestamp_opt(secs, nsecs).single()
 }
 
 // ── Provider impl ─────────────────────────────────────────────────────────────
@@ -504,6 +542,69 @@ mod tests {
     fn test_no_billing_cycle_dates() {
         let snap = parse_usage_summary_response(PARTIAL_NO_BILLING_CYCLE, None).unwrap();
         assert!(snap.windows[0].resets_at.is_none());
+    }
+
+    #[test]
+    fn test_billing_cycle_end_unix_ms_number() {
+        // 1740787200000 = 2025-03-01T00:00:00Z
+        let body = r#"{
+            "billingCycleEnd": 1740787200000,
+            "membershipType": "pro",
+            "individualUsage": {
+                "plan": { "used": 100, "limit": 1000, "totalPercentUsed": 10.0 }
+            }
+        }"#;
+        let snap = parse_usage_summary_response(body, None).unwrap();
+        let resets_at = snap.windows[0].resets_at.unwrap();
+        assert_eq!(resets_at.format("%Y-%m-%d").to_string(), "2025-03-01");
+    }
+
+    #[test]
+    fn test_billing_cycle_end_unix_ms_string() {
+        let body = r#"{
+            "billingCycleEnd": "1740787200000",
+            "membershipType": "pro",
+            "individualUsage": {
+                "plan": { "used": 100, "limit": 1000, "totalPercentUsed": 10.0 }
+            }
+        }"#;
+        let snap = parse_usage_summary_response(body, None).unwrap();
+        let resets_at = snap.windows[0].resets_at.unwrap();
+        assert_eq!(resets_at.format("%Y-%m-%d").to_string(), "2025-03-01");
+    }
+
+    #[test]
+    fn test_billing_cycle_end_legacy_nested() {
+        let body = r#"{
+            "billing_cycle": { "end": "2025-03-01T00:00:00Z" },
+            "membershipType": "pro",
+            "individualUsage": {
+                "plan": { "used": 100, "limit": 1000, "totalPercentUsed": 10.0 }
+            }
+        }"#;
+        let snap = parse_usage_summary_response(body, None).unwrap();
+        let resets_at = snap.windows[0].resets_at.unwrap();
+        assert_eq!(resets_at.format("%Y-%m-%d").to_string(), "2025-03-01");
+    }
+
+    #[test]
+    fn test_billing_cycle_end_live_iso_format() {
+        let body = r#"{
+            "billingCycleEnd": "2026-07-20T13:23:17.000Z",
+            "membershipType": "pro_plus",
+            "individualUsage": {
+                "plan": {
+                    "used": 7000,
+                    "limit": 7000,
+                    "totalPercentUsed": 22.8,
+                    "autoPercentUsed": 7.35,
+                    "apiPercentUsed": 79.0
+                }
+            }
+        }"#;
+        let snap = parse_usage_summary_response(body, None).unwrap();
+        let resets_at = snap.windows[0].resets_at.unwrap();
+        assert_eq!(resets_at.to_rfc3339(), "2026-07-20T13:23:17+00:00");
     }
 
     #[test]
