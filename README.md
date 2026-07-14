@@ -49,6 +49,23 @@ endpoint for API keys yet.
 
 Each provider lives in one file under `src/providers/`.
 
+## Versioning
+
+Releases use calendar versioning: **`vYY.MM.PATCH`**
+
+| Part | Meaning | Example |
+|------|---------|---------|
+| `YY` | Year (two digits) | `26` → 2026 |
+| `MM` | Month | `07` → July |
+| `PATCH` | Release index within that month (starts at `0`) | `0`, `1`, … |
+
+Git tags and GitHub Release assets use this form literally, e.g. `v26.07.0`.
+`Cargo.toml` stores the same value as Rust semver without leading zeros in the
+month field (`26.7.0` ↔ tag `v26.07.0`).
+
+The early tag `v0.2.0` predates this scheme; treat **`v26.07.0`** as its
+calver equivalent.
+
 ## Install (Nix)
 
 ```sh
@@ -60,7 +77,7 @@ systemctl --user enable --now codexbar   # unit shipped in contrib/
 
 Pre-built Linux binaries are attached to
 [GitHub Releases](https://github.com/kreativmonkey/CodexBar-Linux/releases)
-for tagged versions (`v0.1.0`, …).
+for tagged versions (`v26.07.0`, …).
 
 ### Download
 
@@ -72,13 +89,13 @@ for tagged versions (`v0.1.0`, …).
 Optional checksum verification:
 
 ```sh
-sha256sum -c codexbar-x86_64-linux-v0.1.0.tar.gz.sha256
+sha256sum -c codexbar-x86_64-linux-v26.07.0.tar.gz.sha256
 ```
 
 ### Install the binary
 
 ```sh
-tar xzf codexbar-x86_64-linux-v0.1.0.tar.gz
+tar xzf codexbar-x86_64-linux-v26.07.0.tar.gz
 install -Dm755 codexbar-x86_64-linux ~/.local/bin/codexbar
 ```
 
