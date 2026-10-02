@@ -351,7 +351,7 @@ fn draw_7seg_digit(pixmap: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, digit: u
 /// tiny_skia pixels: [R, G, B, A] in memory (RGBA, premultiplied).
 fn pixmap_to_ksni_argb32(raw: &[u8], width: usize, height: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(width * height * 4);
-    for chunk in raw.chunks_exact(4) {
+    for chunk in raw.as_chunks::<4>().0 {
         let r = chunk[0];
         let g = chunk[1];
         let b = chunk[2];
@@ -1127,7 +1127,7 @@ mod tests {
         assert!(icon.is_some());
         // At least some non-transparent pixels expected (ring is drawn)
         let icon = icon.unwrap();
-        let has_visible = icon.data.chunks_exact(4).any(|px| px[0] > 0);
+        let has_visible = icon.data.as_chunks::<4>().0.iter().any(|px| px[0] > 0);
         assert!(has_visible, "icon should have visible pixels");
     }
 
@@ -1140,7 +1140,7 @@ mod tests {
         };
         let icon = render_provider_icon(22, &d).unwrap();
         // Red channel should dominate in some pixel (error dot is #f38ba8)
-        let has_reddish = icon.data.chunks_exact(4).any(|px| {
+        let has_reddish = icon.data.as_chunks::<4>().0.iter().any(|px| {
             // px is [A, R, G, B]; check a clearly reddish pixel with significant alpha
             px[0] > 100 && px[1] > 200 && px[2] < 200
         });
@@ -1153,7 +1153,7 @@ mod tests {
         let icon = render_combined_icon(22, &displays);
         assert!(icon.is_some());
         let icon = icon.unwrap();
-        let has_visible = icon.data.chunks_exact(4).any(|px| px[0] > 0);
+        let has_visible = icon.data.as_chunks::<4>().0.iter().any(|px| px[0] > 0);
         assert!(has_visible, "combined icon should have visible pixels");
     }
 
