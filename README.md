@@ -27,7 +27,7 @@ Waybar, …).
 | Cursor | `cursor` | Cursor app DB or `CURSOR_SESSION_TOKEN` cookie | **Tested** |
 | GitHub Copilot | `copilot` | `COPILOT_API_TOKEN` / `[keys] copilot` | Untested |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` / OpenCode or Pi `auth.json` / `[keys] openrouter` | Untested |
-| OpenCode Zen | `opencode_zen` | OpenCode `auth.json` / `OPENCODE_ZEN_API_KEY` / `[keys] opencode_zen` | No billing API |
+| OpenCode Zen | `opencode_zen` | OpenCode Console session cookie | Untested (private Console API) |
 | OpenAI | `openai` | `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY` / OpenCode or Pi `auth.json` | Untested |
 | Mistral | `mistral` | `MISTRAL_API_KEY` / OpenCode or Pi `auth.json` / `[keys] mistral` | Untested |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` / OpenCode or Pi `auth.json` / `[keys] deepseek` | Untested |
@@ -41,12 +41,10 @@ refresh where applicable).
 **Untested** — provider module and unit tests exist, but no live end-to-end
 verification yet. Bug reports welcome; response mapping may need adjustment.
 
-**No billing API** — the provider can appear when configured, but xAI and
-Perplexity do not expose usage/credits via their public API keys. Grok shows an
-actionable hint; Perplexity requires a browser session cookie (same limitation
-as the macOS original). OpenCode Zen keys are read from the OpenCode CLI
-(`~/.local/share/opencode/auth.json`), but OpenCode does not publish a balance
-endpoint for API keys yet.
+**No billing API** — xAI and Perplexity do not expose usage/credits via their
+public API keys. OpenCode Zen also does not publish an API-key balance endpoint;
+CodexBar instead reads the authenticated Console JSON API. This requires the
+`__Host-console_session` cookie from a signed-in `opencode.ai` browser session.
 
 Each provider lives in one file under `src/providers/`.
 
@@ -186,12 +184,17 @@ popover_margin_right = 8
 # Tray layout: one icon per provider (default) or a single combined icon.
 tray_icon_mode = "per_provider"   # or "combined"
 
+[opencode_zen]
+# Copy from browser developer tools → Storage → Cookies → https://opencode.ai.
+# Only the __Host-console_session cookie is sent.
+# console_cookie = "__Host-console_session=..."
+# workspace_id = "wrk_..." # required when the account has multiple workspaces
+
 # API keys for key-based providers. Environment variables take precedence:
-# OPENROUTER_API_KEY, OPENCODE_ZEN_API_KEY, OPENAI_ADMIN_KEY/OPENAI_API_KEY, MISTRAL_API_KEY,
+# OPENROUTER_API_KEY, OPENAI_ADMIN_KEY/OPENAI_API_KEY, MISTRAL_API_KEY,
 # DEEPSEEK_API_KEY, GROQ_API_KEY, CURSOR_SESSION_TOKEN, COPILOT_API_TOKEN.
 [keys]
 # openrouter = "sk-or-…"
-# opencode_zen = "sk-…"
 # cursor = "<WorkosCursorSessionToken cookie value>"
 ```
 
@@ -203,10 +206,14 @@ Read-only reuse of existing CLI sessions:
   refreshed in place when expired)
 - Codex: `~/.codex/auth.json` (written by `codex` login)
 
-No credentials are stored elsewhere; requests go only to the providers' own
-usage endpoints.
+CodexBar does not create credentials; requests go only to the providers' own
+usage endpoints. API keys and the optional OpenCode Console cookie are stored
+as plain text when configured in `config.toml`. Protect that file with mode
+`0600`; the Console session grants broader access than an inference API key.
 
 OpenCode CLI logins (`~/.local/share/opencode/auth.json`) and Pi agent logins
 (`~/.pi/agent/auth.json`, or `$PI_CODING_AGENT_DIR/auth.json`) are reused
-read-only for OpenRouter, OpenCode Zen, and other API-key providers when no
-explicit key is set. OpenCode is checked before Pi.
+read-only for OpenRouter and other API-key providers when no explicit key is
+set. OpenCode is checked before Pi. OpenCode Zen billing is separate: inference
+keys cannot read the account balance, so it uses the Console cookie above (or
+`OPENCODE_CONSOLE_COOKIE`; optionally `OPENCODE_WORKSPACE_ID`).
