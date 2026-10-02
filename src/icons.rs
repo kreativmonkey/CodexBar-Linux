@@ -41,7 +41,7 @@ pub fn logo_pixmap(provider_id: &str, size: u32, tint: Option<[u8; 3]>) -> Optio
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
     if let Some([r, g, b]) = tint {
-        for px in pixmap.data_mut().chunks_exact_mut(4) {
+        for px in pixmap.data_mut().as_chunks_mut::<4>().0 {
             let a = px[3] as u16;
             // Premultiplied: channel = tint * alpha / 255.
             px[0] = ((r as u16 * a) / 255) as u8;
@@ -61,7 +61,7 @@ mod tests {
         for id in ["claude", "codex", "gemini", "copilot", "openai"] {
             let pm = logo_pixmap(id, 22, Some([255, 255, 255])).expect(id);
             assert!(
-                pm.data().chunks_exact(4).any(|px| px[3] > 0),
+                pm.data().as_chunks::<4>().0.iter().any(|px| px[3] > 0),
                 "{id}: all pixels transparent"
             );
         }
