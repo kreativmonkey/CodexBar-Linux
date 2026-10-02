@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "codexbar"
-version = "26.7.2"
+version = "26.10.0"
 dependencies = [
  "anyhow",
  "async-channel",
