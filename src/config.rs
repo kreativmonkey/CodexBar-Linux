@@ -14,6 +14,15 @@ pub enum TrayIconMode {
     Combined,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct OpenCodeZenConfig {
+    /// Cookie header copied from an authenticated opencode.ai Console session.
+    pub console_cookie: Option<String>,
+    /// Optional workspace override (`wrk_...` or `org_...`).
+    pub workspace_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -31,6 +40,8 @@ pub struct Config {
     pub popover_margin_right: i32,
     /// Tray layout: one icon per provider, or a single combined icon.
     pub tray_icon_mode: TrayIconMode,
+    /// OpenCode Zen Console access. API keys cannot read the PAYG balance.
+    pub opencode_zen: OpenCodeZenConfig,
 }
 
 impl Default for Config {
@@ -42,6 +53,7 @@ impl Default for Config {
             popover_margin_top: 8,
             popover_margin_right: 8,
             tray_icon_mode: TrayIconMode::default(),
+            opencode_zen: OpenCodeZenConfig::default(),
         }
     }
 }
@@ -65,6 +77,13 @@ pub fn api_key(provider_id: &str, env_var: &str) -> Option<String> {
                 .and_then(|c| c.keys.get(provider_id).cloned())
                 .filter(|s| !s.trim().is_empty())
         })
+}
+
+pub fn opencode_zen_config() -> OpenCodeZenConfig {
+    GLOBAL
+        .get()
+        .map(|config| config.opencode_zen.clone())
+        .unwrap_or_default()
 }
 
 pub fn config_path() -> Option<PathBuf> {
@@ -97,5 +116,23 @@ mod tests {
     fn tray_icon_mode_deserializes_combined() {
         let cfg: Config = toml::from_str("tray_icon_mode = \"combined\"").unwrap();
         assert_eq!(cfg.tray_icon_mode, TrayIconMode::Combined);
+    }
+
+    #[test]
+    fn opencode_zen_config_deserializes() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [opencode_zen]
+            console_cookie = "__Host-console_session=test"
+            workspace_id = "wrk_test"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            cfg.opencode_zen.console_cookie.as_deref(),
+            Some("__Host-console_session=test")
+        );
+        assert_eq!(cfg.opencode_zen.workspace_id.as_deref(), Some("wrk_test"));
     }
 }

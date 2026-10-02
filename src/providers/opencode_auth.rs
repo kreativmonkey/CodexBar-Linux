@@ -8,9 +8,6 @@ use std::path::PathBuf;
 const AUTH_FILE: &str = "auth.json";
 const ACCOUNT_FILE: &str = "account.json";
 
-/// OpenCode Zen is stored under the `opencode` service id.
-pub const ZEN_SERVICE_ID: &str = "opencode";
-
 /// Resolve the OpenCode data directory (`~/.local/share/opencode` by default).
 pub fn data_dir() -> Option<PathBuf> {
     std::env::var("XDG_DATA_HOME")
@@ -52,10 +49,6 @@ pub fn provider_api_key(service_id: &str) -> Option<String> {
         }
     }
     None
-}
-
-pub fn zen_key() -> Option<String> {
-    provider_api_key(ZEN_SERVICE_ID)
 }
 
 #[cfg(test)]

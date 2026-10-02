@@ -492,7 +492,11 @@ fn format_tooltip_description(d: &ProviderDisplay) -> String {
         ProviderState::Error(msg) => format!("error — {msg}"),
         ProviderState::Ready(snap) => {
             if snap.windows.is_empty() {
-                return "no data".to_string();
+                return snap
+                    .credits
+                    .as_ref()
+                    .map(format_tooltip_credits)
+                    .unwrap_or_else(|| "no data".to_string());
             }
             snap.windows
                 .iter()
@@ -526,7 +530,12 @@ fn format_provider_line(d: &ProviderDisplay) -> String {
         ProviderState::Error(msg) => format!("{}: error — {}", d.name, msg),
         ProviderState::Ready(snap) => {
             if snap.windows.is_empty() {
-                return format!("{}: no data", d.name);
+                let detail = snap
+                    .credits
+                    .as_ref()
+                    .map(format_tooltip_credits)
+                    .unwrap_or_else(|| "no data".to_string());
+                return format!("{}: {}", d.name, detail);
             }
             let parts: Vec<String> = snap
                 .windows
@@ -542,6 +551,11 @@ fn format_provider_line(d: &ProviderDisplay) -> String {
             format!("{}: {}", d.name, parts.join(", "))
         }
     }
+}
+
+fn format_tooltip_credits(credits: &crate::model::Credits) -> String {
+    let symbol = credits.currency.as_deref().unwrap_or("$");
+    format!("{symbol}{:.2} credits", credits.balance)
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1039,27 @@ mod tests {
         assert!(line.starts_with("Claude:"), "line={line}");
         assert!(line.contains("62%"), "line={line}");
         assert!(line.contains("31%"), "line={line}");
+    }
+
+    #[test]
+    fn tooltip_ready_balance_only() {
+        let display = ProviderDisplay {
+            id: "opencode_zen",
+            name: "OpenCode Zen",
+            state: ProviderState::Ready(UsageSnapshot {
+                credits: Some(crate::model::Credits::from_balance(
+                    27.86,
+                    Some("$".to_string()),
+                )),
+                ..Default::default()
+            }),
+        };
+
+        assert_eq!(format_tooltip_description(&display), "$27.86 credits");
+        assert_eq!(
+            format_provider_line(&display),
+            "OpenCode Zen: $27.86 credits"
+        );
     }
 
     #[test]
